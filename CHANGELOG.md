@@ -2,11 +2,21 @@
 
 正式版的安装包、SHA-256 和更新说明见对应 Release。待办项的进度以对应 Issue 为准。
 
+## 0.6.5 · 2026-11-19
+
+- 首页展示最近 4 个接收批次。单文件显示文件名，多文件可展开查看。
+- 首页只保留「打开接收目录」。资源管理器打开到前台，图片接收后自动写入剪贴板。
+- 取消首页和托盘每 3 秒的轮询，接收、授权变更和恢复窗口时按需刷新。
+- 配对窗口新增 Android 下载入口，Android APK 与更新渠道单独发布。
+- 0.6.4 本机已验证文件夹前置、托盘通知和首页批次；0.6.5 已通过构建和回归测试。本版 Windows 安装器未签名，开启智能应用控制时仍可能遇到 [4551 拦截](https://github.com/xiaodeng2025/MoryPaste/issues/5)。
+
+[发布与下载](https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.5) · [SHA-256](https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.5/SHA256SUMS.txt) · [回退说明](RELEASING.md#需要回退时)
+
 ## 待处理
 
-- [打开接收文件夹时资源管理器可能留在后台 #1](https://github.com/xiaodeng2025/MoryPaste/issues/1)
-- [减少首页和托盘的周期性状态查询 #2](https://github.com/xiaodeng2025/MoryPaste/issues/2)
-- [调整首页最近接收列表与文件名展示 #3](https://github.com/xiaodeng2025/MoryPaste/issues/3)
+- [Android 首次分发与下载引导 #4](https://github.com/xiaodeng2025/MoryPaste/issues/4)
+- [Windows 智能应用控制拦截 #5](https://github.com/xiaodeng2025/MoryPaste/issues/5)
+- [Android 跨 Wi-Fi 自动选电脑的真机验收 #6](https://github.com/xiaodeng2025/MoryPaste/issues/6)
 
 ## 0.6.3 · 2026-11-18
 
