@@ -2,6 +2,17 @@
 
 正式版的安装包、SHA-256 和更新说明见对应 Release。待办项的进度以对应 Issue 为准。
 
+## 0.6.7 · 2026-11-20
+
+- 首页展开管理已授权手机。配对成功弹窗保留「完成」。
+- 剪贴板独立成页，设置集中保存目录、启动通知和局域网授权。
+- 首页首次使用、配对弹窗和关于页均可打开 Android 下载引导。
+- 支持从已具备应用内下载功能的 Windows 版本检查、下载并启动安装向导。
+- 安装包未签名，首次安装的系统拦截继续由 [Issue #5](https://github.com/xiaodeng2025/MoryPaste/issues/5) 跟踪。
+
+[发布与下载](https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.7) · [SHA-256](https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.7/SHA256SUMS.txt) · [回退说明](RELEASING.md#需要回退时)
+
+
 ## 0.6.5 · 2026-11-19
 
 - 首页展示最近 4 个接收批次。单文件显示文件名，多文件可展开查看。
