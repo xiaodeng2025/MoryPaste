@@ -27,6 +27,12 @@ Windows 安装包目前未签名，开启智能应用控制的电脑可能遇到
 ## 版本与支持
 
 - [所有发布版本](https://github.com/xiaodeng2025/MoryPaste/releases) · [版本记录](CHANGELOG.md) · [升级与回退](RELEASING.md)
-- [提交问题或建议](https://github.com/xiaodeng2025/MoryPaste/issues) · [联系邮箱](mailto:hermesdesktop@agent.qq.com)
+- [提交问题或建议](https://github.com/xiaodeng2025/MoryPaste/issues) · 联系邮箱 `hermesdesktop@agent.qq.com`
 
 此仓库用于发布 Windows 和 Android 安装包，并记录更新和问题。
+
+## 支持项目
+
+如果 MoryPaste 对你有帮助，欢迎用微信扫码打赏，支持后续维护。
+
+<img src="assets/wechat-support.png" alt="微信扫码打赏 MoryPaste" width="220">
