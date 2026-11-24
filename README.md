@@ -29,7 +29,16 @@ Windows 安装包目前未签名，开启智能应用控制的电脑可能遇到
 - [所有发布版本](https://github.com/xiaodeng2025/MoryPaste/releases) · [版本记录](CHANGELOG.md) · [升级与回退](RELEASING.md)
 - [提交问题或建议](https://github.com/xiaodeng2025/MoryPaste/issues) · 联系邮箱 `hermesdesktop@agent.qq.com`
 
-此仓库用于发布 Windows 和 Android 安装包，并记录更新和问题。
+此仓库包含 Windows 和 Android 客户端源码、安装包、更新记录和问题反馈。
+
+## 源码与构建
+
+- [Windows 客户端和接收核心](windows/)
+- [Android 客户端](android/)
+- [双端构建说明](BUILDING.md)
+- [GPL-3.0 许可证](LICENSE)
+
+第三方组件各自适用原许可证。官方安装包请从上面的下载入口获取。
 
 ## 支持项目
 

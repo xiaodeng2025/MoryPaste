@@ -1,0 +1,17 @@
+artifacts/
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/app/build/
+windows/.venv/
+windows/__pycache__/
+windows/packaging/vendor/
+*.py[cod]
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
