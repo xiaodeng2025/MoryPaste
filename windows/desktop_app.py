@@ -292,6 +292,11 @@ class DesktopClient:
             on_event=self._on_core_event,
         )
         self.settings = DesktopSettings(APP_DATA, BASE_DIR)
+        self.clipboard_archive = None
+        if getattr(sys, "frozen", False) or "--clipboard-history-local" in sys.argv:
+            from clipboard_archive import ClipboardArchive
+
+            self.clipboard_archive = ClipboardArchive(APP_DATA)
         self.api = DesktopApi(self)
 
     def _on_core_event(self, kind: str, task_id: str) -> None:
@@ -429,6 +434,9 @@ class DesktopClient:
             )
             return False
         self.pending_installer = installer
+        if self.clipboard_archive and self.clipboard_archive.thread is not None:
+            self.clipboard_archive.call("stop")
+            self.clipboard_archive.thread.join(timeout=2)
         if self.tray is not None:
             try:
                 self.tray.stop()
@@ -508,6 +516,8 @@ class DesktopClient:
                 ),
             )
             self.tray.run_detached()
+            if self.clipboard_archive:
+                self.clipboard_archive.start()
             logging.info("桌面客户端就绪；接收核心：%s", self.core.status)
             webview.start(gui="edgechromium", debug=False)
             return 0
@@ -653,6 +663,30 @@ class DesktopApi:
         return {"preferences": self._client.settings.preferences(), "startup": self._client.settings.startup_state(),
                 "notificationsSupported": bool(pystray.Icon.HAS_NOTIFICATION), "copyqRunning": copyq_running,
                 "firewall": self._get_firewall_status()}
+
+    def get_clipboard_archive(self) -> dict:
+        archive = self._client.clipboard_archive
+        return {"available": True, **archive.call("state")} if archive else {"available": False}
+
+    def change_clipboard_archive(self, action, value=None) -> dict:
+        archive = self._client.clipboard_archive
+        if archive is None:
+            return {"error": "本地剪贴板历史未启用。"}
+        if action == "enable" and type(value) is bool:
+            return archive.call("enable", value)
+        if action == "shortcut" and isinstance(value, list) and len(value) == 2:
+            return archive.call("shortcut", *value)
+        if action == "storage" and isinstance(value, list) and len(value) in (2, 3):
+            return archive.call("storage", *value)
+        if action == "storage_folder":
+            os.startfile(archive.path.parent)
+            return {}
+        if action in ("clear", "view"):
+            return archive.call(action)
+        if action == "settings":
+            os.startfile("ms-settings:clipboard")
+            return {}
+        return {"error": "无法识别此剪贴板历史操作。"}
 
     def get_legacy_receipts(self) -> list[dict]:
         return [item for item in recent_receipts(APP_DATA / "diagnostics") if item.get("receiveMode") != "batch"]
@@ -819,6 +853,21 @@ class DesktopApi:
 
 
 def main() -> int:
+    if "--check-clipboard-runtime" in sys.argv:
+        from tempfile import TemporaryDirectory
+        from clipboard_archive import ClipboardArchive
+        from receiver import _NativeClipboardApi
+
+        with TemporaryDirectory(prefix="morypaste-runtime-") as temp:
+            archive = ClipboardArchive(Path(temp))
+            archive.start()
+            state = archive.call("state")
+            archive.call("stop")
+            archive.thread.join(timeout=5)
+            if archive.thread.is_alive() or state.get("error") or state.get("enabled") is not False:
+                return 2
+            _NativeClipboardApi(None, 1, 1)
+        return 0
     try:
         configure_logging()
         instance = SingleInstance()
@@ -858,3 +907,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

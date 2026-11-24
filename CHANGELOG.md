@@ -2,6 +2,14 @@
 
 正式版的安装包、SHA-256 和更新说明见对应 Release。待办项的进度以对应 Issue 为准。
 
+## 0.6.11 · 2026-11-24
+
+- Windows 剪贴板页新增可选的本地历史，通过快捷键查看并按原格式粘贴。
+- 图片和文字按时间分批显示，相同内容和格式的记录去重。
+- 历史内容使用当前 Windows 账户加密，可单独设置图片容量和保留期限。
+
+[发布与下载](https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.11) · [SHA-256](https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.11/SHA256SUMS.txt) · [回退说明](RELEASING.md#需要回退时)
+
 ## 0.6.7 · 2026-11-20
 
 - 首页展开管理已授权手机。配对成功弹窗保留「完成」。

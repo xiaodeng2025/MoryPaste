@@ -239,3 +239,9 @@ dialog .subtitle { font-size: 13px; }
 .guide-link{display:inline-flex;align-items:center;min-height:36px;color:#1d54bb;text-underline-offset:3px}
 .guide-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .guide-next{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:9px 11px;border-top:1px solid var(--line);margin-top:12px;padding-top:13px;color:var(--muted);font-size:13px}
+
+#clipboardArchive { margin-top: 12px; }
+.archive-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
+.archive-actions:empty { display: none; }
+#archiveBinding { color: #475569; font: inherit; font-size: 12px; background: #f1f5f9; border-radius: 4px; padding: 4px 6px; }
+.archive-dialog > p { margin: 10px 0; color: #475569; }

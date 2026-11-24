@@ -55,7 +55,7 @@ except Exception as exc:
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DEFAULT_COPYQ_EXE = os.environ.get("COPYQ_EXE", "copyq.exe")
 COPYQ_EXE = Path(DEFAULT_COPYQ_EXE)
-APP_VERSION = "0.6.10"
+APP_VERSION = "0.6.11"
 PROTOCOL_VERSION = "1"
 DIAGNOSTIC_DIR = APP_DATA / "diagnostics"
 DIAGNOSTIC_MAX_FILE = 1024 * 1024

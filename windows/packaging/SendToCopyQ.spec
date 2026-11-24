@@ -11,7 +11,7 @@ hiddenimports = [
     "clr_loader",
     "pythonnet",
 ]
-for package in ("webview", "pystray", "PIL", "pythonnet", "clr_loader"):
+for package in ("webview", "pystray", "PIL", "pythonnet", "clr_loader", "winrt"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -38,7 +38,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "unittest", "test"],
+    excludes=["unittest", "test"],
     noarchive=False,
     optimize=1,
 )

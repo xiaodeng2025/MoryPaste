@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version,
-    [string]$CompilerPath = 'E:\Inno Setup 7\ISCC.exe'
+    [string]$CompilerPath = 'E:\Inno Setup 7\ISCC.exe',
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,7 @@ $project = Split-Path -Parent $windows
 $python = Join-Path $windows '.venv\Scripts\python.exe'
 $template = Join-Path $PSScriptRoot 'MoryPaste-0.6.3.iss'
 $bootstrapper = Join-Path $PSScriptRoot 'vendor\MicrosoftEdgeWebview2Setup.exe'
-$output = Join-Path $project "artifacts\installer-$Version"
+$output = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $project "artifacts\installer-$Version" }
 $payload = Join-Path $output 'payload'
 $build = Join-Path $output 'build'
 $receiverDist = Join-Path $build 'receiver-dist'

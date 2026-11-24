@@ -297,7 +297,7 @@ async function queueRefresh(...parts) {
 
 function refresh() {
   if (activePage==='home') return queueRefresh('health','legacy');
-  if (activePage==='clipboard') return queueRefresh('settings');
+  if (activePage==='clipboard') return Promise.all([queueRefresh('settings'), refreshArchive()]);
   if (activePage==='settings') return queueRefresh('settings','directory');
   return queueRefresh('devices');
 }
@@ -456,6 +456,141 @@ function enableDesktopLinks() {
 }
 
 window.addEventListener('pywebviewready', enableDesktopLinks);
+window.addEventListener('pywebviewready', () => { if (activePage === 'clipboard') refreshArchive(); });
+window.addEventListener('focus', () => { if (activePage === 'clipboard') refreshArchive(); });
+
+let archiveState, archiveDraft;
+let archiveBusy = false, archiveStorageDirty = false, archiveStorageDraft;
+const storageUsage = value => value < 1048576 ? (value / 1024).toFixed(1) + ' KB' : (value / 1048576).toFixed(1) + ' MB';
+const archiveLabel = ([mods, key]) => [
+  mods & 2 ? 'Ctrl' : '', mods & 1 ? 'Alt' : '', mods & 4 ? 'Shift' : '', key,
+].filter(Boolean).join(' + ');
+
+function renderArchive(state) {
+  byId('clipboardArchive').hidden = !state.available;
+  if (!state.available) return;
+  archiveState = state;
+  byId('archiveEnabled').checked = !!state.enabled;
+  byId('archiveEnabled').disabled = archiveBusy || !!state.error || (!state.enabled && !state.windowsEnabled);
+  byId('archiveWindows').hidden = !!state.windowsEnabled || !!state.error;
+  for (const id of ['archiveView', 'archiveEdit', 'archiveBinding', 'archiveClear']) {
+    byId(id).hidden = !!state.error;
+  }
+  if (state.error) {
+    byId('archiveStatus').textContent = state.error;
+    return;
+  }
+  if (state.storage) {
+    if (!archiveStorageDirty) {
+      byId('archiveDays').value = state.storage.days;
+      byId('archiveImageLimit').value = state.storage.imageLimit;
+    }
+    byId('archiveUsage').textContent = '文字 ' + storageUsage(state.storage.textBytes) + ' · 图片 ' + storageUsage(state.storage.imageBytes);
+  }
+  byId('archiveBinding').textContent = archiveLabel([state.mods, state.key]);
+  byId('archiveStatus').textContent = !state.windowsEnabled ? 'Windows 历史未开启。已保存的记录仍可查看。'
+    : !state.enabled ? '开启后，跟随 Windows 剪贴板历史保存到本机。'
+    : state.syncError || (!state.hotkeyReady ? '本地保存已开启。快捷键被占用，请修改。' : '正在跟随 Windows 剪贴板历史。');
+}
+
+async function refreshArchive() {
+  if (!window.pywebview?.api || archiveBusy) return;
+  try {
+    const state = await bridge('get_clipboard_archive');
+    if (!archiveBusy) renderArchive(state);
+  } catch {
+    renderArchive({available: true, error: '无法读取本地历史状态。'});
+  }
+}
+
+async function changeArchive(action, value = null) {
+  if (archiveBusy) return false;
+  archiveBusy = true;
+  byId('archiveEnabled').disabled = true;
+  try {
+    const state = await bridge('change_clipboard_archive', action, value);
+    if (state.error) throw Error(state.error);
+    if (typeof state.enabled === 'boolean') renderArchive({available: true, ...state});
+    return state;
+  } catch (error) {
+    toast(error.message, true);
+    return false;
+  } finally {
+    archiveBusy = false;
+    if (archiveState) renderArchive(archiveState);
+  }
+}
+
+byId('archiveEnabled').onchange = event => changeArchive('enable', event.target.checked);
+byId('archiveWindows').onclick = () => changeArchive('settings');
+byId('archiveView').onclick = () => changeArchive('view');
+byId('archiveDays').onchange = byId('archiveImageLimit').oninput = () => { archiveStorageDirty = true; };
+byId('archiveFolder').onclick = () => changeArchive('storage_folder');
+const retentionDialog = byId('archiveRetentionDialog');
+byId('archiveRetentionCancel').onclick = () => retentionDialog.close();
+
+async function saveArchiveStorage(binding, confirmedCount) {
+  const state = await changeArchive('storage', [...binding, confirmedCount]);
+  if (!state) return;
+  if (typeof state.pending === 'number') {
+    if (state.pending === 0 && confirmedCount === null) {
+      await saveArchiveStorage(binding, 0);
+      return;
+    }
+    archiveStorageDraft = {binding, count: state.pending};
+    byId('archiveRetentionMessage').textContent = '此设置将清理 ' + state.pending + ' 条本地记录。系统 Win + V 历史会保留。';
+    if (!retentionDialog.open) retentionDialog.showModal();
+    return;
+  }
+  archiveStorageDirty = false;
+  renderArchive(archiveState);
+  if (retentionDialog.open) retentionDialog.close();
+  toast('已保存历史存储设置');
+}
+
+byId('archiveSaveStorage').onclick = () => {
+  const limit = byId('archiveImageLimit');
+  if (!limit.value || !limit.reportValidity()) return;
+  saveArchiveStorage([Number(byId('archiveDays').value), Number(limit.value)], null);
+};
+byId('archiveRetentionConfirm').onclick = () => {
+  if (archiveStorageDraft) saveArchiveStorage(archiveStorageDraft.binding, archiveStorageDraft.count);
+};
+
+byId('archiveClear').onclick = () => byId('archiveClearDialog').showModal();
+byId('archiveKeep').onclick = () => byId('archiveClearDialog').close();
+byId('archiveConfirmClear').onclick = async () => {
+  if (await changeArchive('clear')) {
+    byId('archiveClearDialog').close();
+    toast('已清空本地剪贴板历史');
+  }
+};
+const setArchiveDraft = binding => {
+  archiveDraft = binding;
+  byId('archiveCapture').textContent = archiveLabel(binding);
+  byId('archiveShortcutMessage').textContent = '';
+};
+byId('archiveEdit').onclick = () => {
+  setArchiveDraft([archiveState.mods, archiveState.key]);
+  byId('archiveShortcutDialog').showModal();
+  byId('archiveCapture').focus();
+};
+byId('archiveCancel').onclick = () => byId('archiveShortcutDialog').close();
+byId('archiveReset').onclick = () => setArchiveDraft([7, 'V']);
+byId('archiveCapture').onkeydown = event => {
+  if (['Escape', 'Tab'].includes(event.key)) return;
+  event.preventDefault();
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return;
+  if (event.metaKey || !(event.ctrlKey || event.altKey) || !/^Key[A-Z]$/.test(event.code)) {
+    byId('archiveShortcutMessage').textContent = '请使用 Ctrl 或 Alt 搭配一个英文字母。';
+    return;
+  }
+  const mods = (event.ctrlKey ? 2 : 0) | (event.altKey ? 1 : 0) | (event.shiftKey ? 4 : 0);
+  setArchiveDraft([mods, event.code.slice(3)]);
+};
+byId('archiveSave').onclick = async () => {
+  if (await changeArchive('shortcut', archiveDraft)) byId('archiveShortcutDialog').close();
+};
 enableDesktopLinks();
 byId('backToPair').onclick = startPairing;
 byId('openAndroidRelease').onclick = async () => {
