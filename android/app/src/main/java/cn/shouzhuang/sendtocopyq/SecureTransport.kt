@@ -213,8 +213,8 @@ object SecureTransport {
     fun verifyFileCapability(peer: PairedComputer): Boolean =
         verifiedHealth(peer, peer.host, peer.port).optBoolean("fileReceive")
 
-    private fun verifiedHealth(peer: PairedComputer, host: String, port: Int): JSONObject {
-        val active = openPinned("https://$host:$port/health", peer.fingerprint, 2000, 2000)
+    private fun verifiedHealth(peer: PairedComputer, host: String, port: Int, network: android.net.Network? = null): JSONObject {
+        val active = openPinned("https://$host:$port/health", peer.fingerprint, 2000, 2000, network)
         try {
             active.requestMethod = "GET"
             active.connect()
@@ -343,7 +343,56 @@ object SecureTransport {
         }
     }
 
-    private fun openPinned(url: String, expectedFingerprint: String, connectTimeout: Int = 7000, readTimeout: Int = 20000): HttpsURLConnection {
+    const val MAX_CLIPBOARD_TEXT_BYTES = 32 * 1024
+
+    fun supportsClipboardText(peer: PairedComputer, network: android.net.Network): Boolean =
+        verifiedHealth(peer, peer.host, peer.port, network).optBoolean("clipboardTextReceive")
+
+    fun sendClipboardText(peer: PairedComputer, network: android.net.Network, bytes: ByteArray) {
+        require(bytes.size in 1..MAX_CLIPBOARD_TEXT_BYTES)
+        val connection = openClipboardRequest(peer, network, "/clipboard/text",
+            "application/vnd.morypaste.clipboard-text", bytes)
+        try {
+            connection.outputStream.use { it.write(bytes) }
+            val response = readResponse(connection)
+            when (connection.responseCode) {
+                200 -> check(response.optBoolean("ok")) { "电脑未确认写入剪贴板，请在电脑上检查。" }
+                401 -> error("这台电脑的授权已失效，请重新配对。")
+                404 -> error("这台电脑还不支持接收剪贴板文字。")
+                503 -> error("电脑剪贴板暂时不可用，请再试一次。")
+                else -> error("电脑未确认写入剪贴板，请在电脑上检查。")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun openClipboardSubscription(peer: PairedComputer, network: android.net.Network): HttpsURLConnection =
+        openClipboardRequest(peer, network, "/clipboard/subscribe", "application/vnd.morypaste.clipboard-subscription", ByteArray(0))
+
+    private fun openClipboardRequest(peer: PairedComputer, network: android.net.Network, path: String,
+                                     mime: String, body: ByteArray): HttpsURLConnection {
+        val timestamp = (System.currentTimeMillis() / 1000L).toString()
+        val nonce = ByteArray(18).also { SecureRandom().nextBytes(it) }.toHex()
+        val hash = sha256(body)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(peer.secret, "HmacSHA256"))
+        val signature = mac.doFinal("$timestamp\n$nonce\n$mime\n${body.size}\n$hash".toByteArray(Charsets.UTF_8)).toHex()
+        return openPinned("https://${peer.host}:${peer.port}$path", peer.fingerprint,
+            connectTimeout = 2500, readTimeout = 7000, network = network).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setFixedLengthStreamingMode(body.size)
+            setRequestProperty("Content-Type", mime)
+            setRequestProperty("X-Device-Id", peer.deviceId)
+            setRequestProperty("X-Timestamp", timestamp)
+            setRequestProperty("X-Nonce", nonce)
+            setRequestProperty("X-Content-SHA256", hash)
+            setRequestProperty("X-Signature", signature)
+        }
+    }
+
+    private fun openPinned(url: String, expectedFingerprint: String, connectTimeout: Int = 7000, readTimeout: Int = 20000, network: android.net.Network? = null): HttpsURLConnection {
         val manager = object : X509TrustManager {
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -358,7 +407,8 @@ object SecureTransport {
         }
         val context = SSLContext.getInstance("TLS")
         context.init(null, arrayOf(manager), SecureRandom())
-        return (URL(url).openConnection() as HttpsURLConnection).apply {
+        val endpoint = URL(url)
+        return ((network?.openConnection(endpoint) ?: endpoint.openConnection()) as HttpsURLConnection).apply {
             this.connectTimeout = connectTimeout
             this.readTimeout = readTimeout
             instanceFollowRedirects = false

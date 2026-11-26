@@ -27,12 +27,16 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -117,6 +121,8 @@ open class MainActivity : ComponentActivity() {
     private var activeTargetName = ""
     private var deviceList: LinearLayout? = null
     private var discoveryStatus: TextView? = null
+    private data class ReceptionRow(val card: View, val status: TextView, val receive: TextView)
+    private val receptionRows = mutableMapOf<String, ReceptionRow>()
     private val discovery by lazy { LanDiscovery(this) }
     private val computerStatus = ConcurrentHashMap<String, String>()
     private val probingComputers = ConcurrentHashMap.newKeySet<String>()
@@ -138,6 +144,13 @@ open class MainActivity : ComponentActivity() {
             Toast.makeText(this, "手机身份初始化失败：${e.message ?: "请重启应用后重试"}", Toast.LENGTH_LONG).show()
         }
         if (shareMode) handleIncomingIntent(intent) else showHome()
+        if (!shareWindow) {
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    ClipboardSyncService.receptionUi.collect { state -> renderReceptionStatus(state) }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -216,50 +229,68 @@ open class MainActivity : ComponentActivity() {
 
     private fun showHome() {
         rootColumn.removeAllViews()
+        receptionRows.clear()
         val peers = PeerStore.list(this)
         rootColumn.addView(brandHeader())
         TextView(this).apply {
-            text = "从手机分享图片，直接发送到电脑。"
+            text = "分享图片、视频和文件，收发剪贴板文字。"
             textSize = 15f
             setTextColor(color(R.color.secondary_text))
             setPadding(dp(2), dp(14), 0, dp(22))
         }.also { rootColumn.addView(it) }
-        rootColumn.addView(label(if (peers.isEmpty()) "添加一台电脑" else "已配对电脑", 17f, true).apply {
-            setPadding(dp(2), dp(6), 0, dp(8))
-        }, verticalParams(dp(10)))
+        val deviceHeading = label(if (peers.isEmpty()) "添加一台电脑" else "已配对电脑", 17f, true)
+        val deviceHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), 0, 0, 0)
+            addView(deviceHeading, LinearLayout.LayoutParams(0, -2, 1f))
+            if (peers.isNotEmpty()) {
+                addView(homeTextAction("刷新") { refreshDiscovery() }, LinearLayout.LayoutParams(-2, -2))
+                addView(homeTextAction("＋ 添加电脑") { openPairScanner() }, LinearLayout.LayoutParams(-2, -2))
+            }
+        }
+        rootColumn.addView(deviceHeader, verticalParams(dp(10)))
         deviceList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         rootColumn.addView(deviceList, verticalParams(0))
         if (peers.isNotEmpty()) {
-            val scanRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(2), dp(6), 0, dp(2))
+            discoveryStatus = label("正在查找局域网电脑…", 12f, false, R.color.secondary_text).apply {
+                setPadding(dp(2), dp(2), dp(2), 0)
             }
-            discoveryStatus = label("正在查找局域网电脑…", 12f, false, R.color.secondary_text)
-            scanRow.addView(discoveryStatus, LinearLayout.LayoutParams(0, -2, 1f))
-            val refresh = secondaryButton("刷新") { refreshDiscovery() }
-            scanRow.addView(refresh, LinearLayout.LayoutParams(dp(92), dp(40)))
-            rootColumn.addView(scanRow, verticalParams(dp(4)))
+            rootColumn.addView(discoveryStatus, verticalParams(dp(6)))
         } else {
             discoveryStatus = null
-            TextView(this).apply {
-                text = "电脑接收端运行后，扫描一次性二维码即可配对。"
-                textSize = 13f
-                setTextColor(color(R.color.secondary_text))
+            rootColumn.addView(label("扫描电脑上的二维码即可配对。", 13f, false, R.color.secondary_text).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(8), dp(4), dp(8), dp(12))
-            }.also { rootColumn.addView(it) }
+            })
+            pairButton = primaryButton("添加电脑") { openPairScanner() }
+            rootColumn.addView(pairButton, verticalParams(dp(12)))
         }
         renderComputerList(peers)
 
-        pairButton = primaryButton(if (peers.isEmpty()) "添加电脑" else "＋   添加电脑") { openPairScanner() }
-        rootColumn.addView(pairButton, verticalParams(dp(12)))
-
         addDivider(top = dp(8), bottom = dp(4))
+        if (peers.isNotEmpty()) {
+            rootColumn.addView(settingsRow("添加「发到电脑」桌面图标", "›") {
+                val shortcuts = getSystemService(android.content.pm.ShortcutManager::class.java)
+                val icon = android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_send_clipboard_shortcut)
+                val open = Intent(this, SendClipboardActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val shortcut = android.content.pm.ShortcutInfo.Builder(this, "send-clipboard")
+                    .setShortLabel(getString(R.string.send_clipboard_tile))
+                    .setIcon(icon)
+                    .setIntent(open)
+                    .build()
+                if (!shortcuts.isRequestPinShortcutSupported || !shortcuts.requestPinShortcut(shortcut, null)) {
+                    Toast.makeText(this, "当前桌面不支持添加此图标。", Toast.LENGTH_SHORT).show()
+                }
+            })
+        }
         rootColumn.addView(settingsRow("关于与版本", "${BuildConfig.VERSION_NAME}  ›") {
             AlertDialog.Builder(this@MainActivity)
-                .setTitle("发送到电脑")
-                .setMessage("版本 ${BuildConfig.VERSION_NAME}\n图片只会在你主动分享时发送。配对凭据保存在此设备的安全存储中。\n\n最近发送：${DiagnosticLogger.latestSummary(this@MainActivity)}\n\n可导出近 7 天的本地诊断日志；不含图片内容、URI 或配对密钥。")
+                .setTitle(R.string.app_name)
+                .setMessage("版本 ${BuildConfig.VERSION_NAME}\n图片、视频和文件从系统分享菜单发送。剪贴板文字可主动发送，也可开启接收。配对凭据保存在此设备的安全存储中。\n\n最近发送：${DiagnosticLogger.latestSummary(this@MainActivity)}\n\n可导出近 7 天的本地诊断日志；不含图片内容、URI 或配对密钥。")
                 .setNeutralButton("导出诊断日志") { _, _ ->
                     diagnosticsExportLauncher.launch("SendToCopyQ-Android-diagnostics.zip")
                 }
@@ -302,7 +333,7 @@ open class MainActivity : ComponentActivity() {
         }
         val phone = android.widget.ImageView(this@MainActivity).apply {
             setImageResource(R.drawable.ic_phone_route)
-            contentDescription = "手机图片"
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
         }
         route.addView(phone, LinearLayout.LayoutParams(dp(42), dp(54)))
@@ -312,15 +343,11 @@ open class MainActivity : ComponentActivity() {
         })
         val computer = android.widget.ImageView(this@MainActivity).apply {
             setImageResource(R.drawable.ic_computer_outline)
-            contentDescription = "电脑"
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
         }
         route.addView(computer, LinearLayout.LayoutParams(dp(66), dp(54)))
         addView(route)
-        addView(label("支持截图、相册及其他图片分享", 13f, false, R.color.secondary_text).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, 0)
-        })
     }
 
     private fun cleanComputerName(name: String): String = name.ifBlank { "我的电脑" }
@@ -490,13 +517,14 @@ open class MainActivity : ComponentActivity() {
         probingComputers.clear()
         scanRunning = true
         peers.forEach { computerStatus[it.computerId] = STATUS_SEARCHING }
-        discoveryStatus?.text = "正在查找局域网电脑…"
+        renderDiscoveryStatus(peers, network != null)
         renderComputerList(peers)
         discovery.start(object : LanDiscovery.Listener {
             override fun onStage(computerId: String?, status: String) {
                 if (generation != scanGeneration) return
                 if (computerId != null) computerStatus[computerId] = status
                 else if (status != "正在解析地址") peers.forEach { computerStatus[it.computerId] = status }
+                renderDiscoveryStatus(peers, network != null)
                 renderComputerList()
             }
             override fun onService(computer: DiscoveredComputer) {
@@ -504,6 +532,7 @@ open class MainActivity : ComponentActivity() {
                 val peer = PeerStore.list(this@MainActivity).firstOrNull { it.computerId == computer.computerId } ?: return
                 if (!probingComputers.add(peer.computerId)) return
                 computerStatus[peer.computerId] = STATUS_VERIFYING
+                renderDiscoveryStatus(peers, network != null)
                 renderComputerList()
                 worker.execute {
                     var verified = false
@@ -530,6 +559,7 @@ open class MainActivity : ComponentActivity() {
                         } else {
                             computerStatus[peer.computerId] = if (identityFailure) STATUS_IDENTITY_ERROR else "连接电脑失败"
                         }
+                        renderDiscoveryStatus(peers, network != null)
                         rememberHomeTarget(peers, network)
                         renderComputerList()
                     }
@@ -542,11 +572,25 @@ open class MainActivity : ComponentActivity() {
                 peers.forEach { peer ->
                     if (computerStatus[peer.computerId] == STATUS_SEARCHING) computerStatus[peer.computerId] = "未发现电脑"
                 }
-                discoveryStatus?.text = "查找已完成 · 仅显示已配对电脑"
+                renderDiscoveryStatus(peers, network != null)
                 rememberHomeTarget(peers, network)
                 renderComputerList()
             }
         }, 2500L)
+    }
+
+    private fun renderDiscoveryStatus(peers: List<PairedComputer>, hasWifi: Boolean) {
+        val statuses = peers.map { computerStatus[it.computerId] }
+        val message = when {
+            !hasWifi -> "请连接 Wi-Fi 后刷新。"
+            scanRunning || STATUS_VERIFYING in statuses -> "正在查找局域网电脑…"
+            STATUS_REACHABLE in statuses -> null
+            else -> "未找到电脑，请检查局域网后刷新。"
+        }
+        discoveryStatus?.apply {
+            text = message
+            visibility = if (message == null) View.GONE else View.VISIBLE
+        }
     }
 
     private fun stopDiscovery() {
@@ -572,51 +616,102 @@ open class MainActivity : ComponentActivity() {
     private fun renderComputerList(peers: List<PairedComputer> = PeerStore.list(this)) {
         val container = deviceList ?: return
         container.removeAllViews()
+        receptionRows.clear()
         val reachableIds = computerStatus.filterValues { it == STATUS_REACHABLE }.keys
         val ordered = PeerCatalog.ordered(peers, reachableIds)
         ordered.forEach { peer ->
-            val reachable = computerStatus[peer.computerId] == STATUS_REACHABLE
+            val computer = cleanComputerName(peer.name)
+            val send = {
+                startActivity(Intent(this, SendClipboardActivity::class.java)
+                    .putExtra(SendClipboardActivity.TARGET_COMPUTER_ID, peer.computerId))
+            }
             val card = surfaceCard().apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(13), dp(13), dp(10), dp(13))
-                background = rounded(R.color.card_background, 16)
+                setPadding(dp(13), dp(9), dp(6), dp(9))
+                contentDescription = computer
+                isFocusable = true
+                setOnClickListener { send() }
+                setOnLongClickListener {
+                    confirmRemoveComputer(peer)
+                    true
+                }
             }
-            val icon = android.widget.ImageView(this).apply {
+            ViewCompat.replaceAccessibilityAction(
+                card, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK, "移除配对",
+            ) { _, _ ->
+                confirmRemoveComputer(peer)
+                true
+            }
+            val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_computer_outline)
-                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                setPadding(dp(5), dp(7), dp(5), dp(7))
-                background = rounded(R.color.brand_blue_soft, 14)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setPadding(dp(5), dp(6), dp(5), dp(6))
+                background = rounded(R.color.brand_blue_soft, 12)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            card.addView(icon, LinearLayout.LayoutParams(dp(44), dp(44)))
-            val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(4), 0) }
-            detail.addView(label(cleanComputerName(peer.name), 16f, true))
-            val status = computerStatus[peer.computerId] ?: "暂不可连接"
-            val statusColor = when (status) {
-                STATUS_REACHABLE -> R.color.success_green
-                STATUS_IDENTITY_ERROR -> R.color.error_text
-                STATUS_VERIFYING, STATUS_SEARCHING -> R.color.brand_blue
-                else -> R.color.secondary_text
+            card.addView(icon, LinearLayout.LayoutParams(dp(38), dp(38)))
+            val detail = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(9), 0, dp(4), 0)
             }
-            val info = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(3), 0, 0) }
-            info.addView(TextView(this).apply {
-                text = if (reachable) "●" else "○"
-                textSize = 11f
-                setTextColor(color(statusColor))
-            })
-            info.addView(label(status, 12f, false, statusColor).apply { setPadding(dp(5), 0, 0, 0) })
-            detail.addView(info)
+            detail.addView(label(computer, 16f, true))
+            val status = label("", 12f, false, R.color.secondary_text).apply {
+                setPadding(0, dp(3), 0, 0)
+            }
+            detail.addView(status)
             card.addView(detail, LinearLayout.LayoutParams(0, -2, 1f))
-            val remove = TextView(this).apply {
-                text = "移除"
-                textSize = 12f
-                setTextColor(color(R.color.secondary_text))
-                setPadding(dp(10), dp(12), dp(4), dp(12))
-                setOnClickListener { confirmRemoveComputer(peer) }
+            val actions = LinearLayout(this).apply {
+                orientation = if (resources.configuration.fontScale > 1.2f) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
             }
-            card.addView(remove)
+            actions.addView(homeTextAction("发送剪贴板", send), LinearLayout.LayoutParams(-2, -2))
+            val receive = homeTextAction("接收文字") {
+                val service = Intent(this, ClipboardSyncService::class.java)
+                if (ClipboardSyncService.selectedComputer == peer.computerId) {
+                    stopService(service)
+                } else {
+                    service.putExtra(ClipboardSyncService.COMPUTER_ID, peer.computerId)
+                    startForegroundService(service)
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 629)
+                    }
+                }
+            }
+            actions.addView(receive, LinearLayout.LayoutParams(-2, -2))
+            card.addView(actions, LinearLayout.LayoutParams(-2, -2))
+            receptionRows[peer.computerId] = ReceptionRow(card, status, receive)
             container.addView(card, verticalParams(if (container.childCount == 0) 0 else dp(8)))
         }
+        renderReceptionStatus(ClipboardSyncService.receptionUi.value)
+    }
+
+    private fun renderReceptionStatus(state: ClipboardSyncService.ReceptionUi?) {
+        if (shareMode) return
+        receptionRows.forEach { (computerId, row) ->
+            val reception = state?.takeIf { it.computerId == computerId }
+            val status = reception?.status ?: computerStatus[computerId] ?: "暂不可连接"
+            row.status.text = status
+            row.status.setTextColor(color(when (status) {
+                STATUS_REACHABLE, "同步已连接" -> R.color.success_green
+                STATUS_IDENTITY_ERROR -> R.color.error_text
+                else -> R.color.secondary_text
+            }))
+            ViewCompat.setStateDescription(row.card, status)
+            row.receive.text = if (reception == null) "接收文字" else "停止接收"
+        }
+    }
+
+    private fun homeTextAction(title: String, action: () -> Unit) = label(title, 13f, true, R.color.brand_blue).apply {
+        gravity = Gravity.CENTER
+        minimumHeight = dp(48)
+        setPadding(dp(8), 0, dp(8), 0)
+        isFocusable = true
+        foreground = android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(color(R.color.brand_blue_soft)), null, rounded(R.color.card_background, 8),
+        )
+        setOnClickListener { action() }
     }
 
     private fun secondaryButton(title: String, action: () -> Unit) = MaterialButton(this).apply {

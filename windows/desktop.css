@@ -245,3 +245,18 @@ dialog .subtitle { font-size: 13px; }
 .archive-actions:empty { display: none; }
 #archiveBinding { color: #475569; font: inherit; font-size: 12px; background: #f1f5f9; border-radius: 4px; padding: 4px 6px; }
 .archive-dialog > p { margin: 10px 0; color: #475569; }
+
+/* Dashboard refinements */
+main { margin-right: 8px; padding-inline: clamp(16px, 3vw, 30px); scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.home-device-panel .device-row { gap: 8px; padding-block: 8px; flex-wrap: wrap; }
+.home-device-panel .device-row > .text-button { padding-inline: 6px; }
+.device-info p { margin-top: 2px; }
+.receipt-info p { white-space: normal; overflow-wrap: anywhere; }
+.receipt-meta { flex-wrap: wrap; }
+.archive-shortcut { display: inline-flex; align-items: center; gap: 8px; }
+.archive-shortcut:not(:has(:not([hidden]))) { display: none; }
+.archive-fields label { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.archive-fields + .hint { margin: 10px 0 12px; }
+.setting-note { margin-top: 10px; background: var(--page, #f8fafc); }
+.setting-note .setting-row { justify-content: flex-start; }
+.about-actions .secondary { min-width: 100px; }

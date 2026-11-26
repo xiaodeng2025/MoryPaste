@@ -49,10 +49,26 @@ function renderDevices(devices) {
     const revoke = text('button', '撤销授权', 'text-button');
     revoke.onclick = () => {
       pendingRevoke = device;
-      byId('confirmMessage').textContent = '撤销“' + device.name + '”后，这台手机将无法继续发送图片。你可以随时重新配对。';
+      byId('confirmMessage').textContent = '撤销“' + device.name + '”后，这台手机将无法发送文件、图片或剪贴板文字，也无法接收电脑剪贴板。你可以重新配对。';
       byId('confirmDialog').showModal();
     };
-    row.append(badge, info, revoke);
+    const syncStatus = device.clipboardSync
+      ? (device.clipboardConnected ? '电脑 → 手机 · 已连接，复制文字即可同步' : '电脑 → 手机 · 已授权，当前未连接')
+      : '电脑 → 手机 · 未开启';
+    info.append(text('p', syncStatus));
+    const sync = text('button', device.clipboardSync ? '关闭同步' : '开启同步', 'text-button');
+    sync.onclick = async () => {
+      sync.disabled = true;
+      try {
+        await request('/api/clipboard-target', {deviceId: device.clipboardSync ? null : device.id});
+        await queueRefresh('devices');
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        sync.disabled = false;
+      }
+    };
+    row.append(badge, info, sync, revoke);
     root.append(row);
   }
 }
@@ -128,7 +144,7 @@ function renderRecent(items) {
     if (!item.files) {
       info.append(text('strong', item.device || '已授权手机'));
       info.append(text('p', (item.mime === 'image/png' ? 'PNG' : 'JPEG') + ' · ' + bytes(item.bytes)));
-      side.append(text('span', item.backend === 'Windows native' ? 'Windows 原生剪贴板' : item.backend || ''));
+      side.append(text('span', '已写入剪贴板'));
       continue;
     }
     const counts = {};
@@ -138,8 +154,13 @@ function renderRecent(items) {
     const complete = item.files.length === item.total;
     if (complete && item.total === 1) info.append(receiptName(item.files[0].name));
     else info.append(text('strong', title || '文件'));
-    const status = complete ? (item.clipboard === 'failed' ? ' · 已保存，图片未复制' : '')
-      : ' · 已保存 ' + item.files.length + '/' + item.total;
+    const result = {
+      image: '已保存 · 可直接粘贴',
+      files: '已保存 · 可作为文件粘贴',
+      failed: '已保存 · 图片未写入剪贴板',
+      unchanged: '已保存至目录',
+    };
+    const status = ' · ' + (complete ? (result[item.clipboard] || '已保存至目录') : '已保存 ' + item.files.length + '/' + item.total);
     const source = item.device || '已授权手机';
     const description = (complete && item.total === 1 ? title + ' · ' : '') + source + status;
     const metadata = text('p', description);
@@ -207,7 +228,7 @@ function renderSettings(settings, state) {
     const notify=byId('notificationSwitch');
     notify.disabled=!settings.notificationsSupported;
     notify.setAttribute('aria-checked', String(settings.preferences.notifications));
-    if(!settings.notificationsSupported)byId('notificationDescription').textContent='当前 Windows 托盘不支持通知，图片接收不受影响。';
+    if(!settings.notificationsSupported)byId('notificationDescription').textContent='当前 Windows 托盘不支持通知，文件接收和剪贴板文字仍可使用。';
     const fw=settings.firewall;
     byId('firewallStatus').textContent=fw.available===false?fw.reason:fw.authorized===true
       ?'已授权 · '+(fw.interface||'当前网卡')+' · '+(fw.profile||'当前网络'):fw.reason||'尚未授权局域网接收';
@@ -313,6 +334,12 @@ window.morypasteWindowVisible=visible=>{
 };
 if (!window.chrome?.webview) {
   document.addEventListener('visibilitychange',()=>window.morypasteWindowVisible(!document.hidden));
+  setInterval(()=>{
+    if (desktopVisible && activePage==='home' && !byId('homeDevicePanel').hidden
+        && receiverState?.devices.some(device=>device.clipboardSync)) {
+      queueRefresh('devices');
+    }
+  }, 2000);
 } else {
   window.chrome.webview.addEventListener('message',({data})=>{
     if (data?.type==='morypasteWindowVisible') window.morypasteWindowVisible(data.value);

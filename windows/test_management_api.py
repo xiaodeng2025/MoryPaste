@@ -21,7 +21,7 @@ class ManagementApiTests(unittest.TestCase):
         cls.old_state = getattr(receiver.DashboardHandler, "state", None)
         state = SimpleNamespace(lock=threading.RLock(), devices={}, last_pairing=None, bind_ip="192.168.3.53", interface="test", interface_index=1,
                                 copyq_version="not checked", fingerprint="test", computer_id="test", computer_name="test",
-                                discovery_status="registered", pair_codes={}, last_event={})
+                                discovery_status="registered", pair_codes={}, last_event={}, clipboard_stream=None)
         state.issue_pair_code = lambda: receiver.State.issue_pair_code(state)
         receiver.DashboardHandler.state = state
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), receiver.DashboardHandler)
@@ -132,6 +132,22 @@ class ManagementApiTests(unittest.TestCase):
                 lan.close()
             with self.assertRaises(OSError):
                 socket.create_connection(address, timeout=1)
+
+    def test_clipboard_authorization_survives_disconnect(self):
+        state = self.server.RequestHandlerClass.state
+        devices = {"one": {"clipboardSync": True}, "two": {}}
+        with patch.object(state, "devices", devices), patch.object(state, "clipboard_stream", (object(), "one")):
+            with self.opener.open(self.url + "/api/state", timeout=3) as response:
+                connected, unauthorized = json.load(response)["devices"]
+            self.assertTrue(connected["clipboardSync"])
+            self.assertTrue(connected["clipboardConnected"])
+            self.assertFalse(unauthorized["clipboardSync"])
+            self.assertFalse(unauthorized["clipboardConnected"])
+            state.clipboard_stream = None
+            with self.opener.open(self.url + "/api/state", timeout=3) as response:
+                disconnected = json.load(response)["devices"][0]
+            self.assertTrue(disconnected["clipboardSync"])
+            self.assertFalse(disconnected["clipboardConnected"])
 
     def test_state_returns_one_row_per_authorization_and_last_pairing_status(self):
         self.server.RequestHandlerClass.state.devices = {

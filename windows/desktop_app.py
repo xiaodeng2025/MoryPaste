@@ -52,7 +52,6 @@ WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2
 
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 INSTALL_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BASE_DIR
-TRAY_ICON_PATH = BASE_DIR / "desktop_resources" / "morypaste.png"
 WINDOW_ICON_PATH = BASE_DIR / "desktop_resources" / "morypaste.ico"
 
 
@@ -134,7 +133,7 @@ from data_paths import resolve_data_dir
 try:
     APP_DATA = resolve_data_dir()
 except Exception as exc:
-    ctypes.windll.user32.MessageBoxW(None, str(exc), 'SendToCopyQ 数据隔离检查失败', 0x10)
+    ctypes.windll.user32.MessageBoxW(None, str(exc), 'MoryPaste 数据隔离检查失败', 0x10)
     raise SystemExit(2)
 
 LOG_PATH = APP_DATA / "desktop-client.log"
@@ -182,7 +181,7 @@ def install_webview2_if_needed() -> bool:
     while True:
         if not ask_yes_no(
             "安装 Microsoft WebView2",
-            "SendToCopyQ 的桌面窗口需要 Microsoft WebView2 Runtime。当前电脑尚未检测到它。\n\n"
+            "MoryPaste 的桌面窗口需要 Microsoft WebView2 Runtime。当前电脑尚未检测到它。\n\n"
             "现在将运行随安装包提供的微软官方安装程序。若电脑没有网络，安装可能失败；"
             "此过程使用当前用户权限，不会安装 Windows 服务。\n\n是否现在安装？",
         ):
@@ -207,7 +206,7 @@ def install_webview2_if_needed() -> bool:
         if not ask_yes_no(
             "WebView2 安装未完成",
             f"没有检测到安装成功的 WebView2 Runtime。\n{detail}\n\n"
-            "选择“是”重试；选择“否”打开微软官方页面，稍后可重新启动 SendToCopyQ。",
+            "选择“是”重试；选择“否”打开微软官方页面，稍后可重新启动 MoryPaste。",
         ):
             try:
                 os.startfile(WEBVIEW2_DOWNLOAD_URL)
@@ -278,10 +277,12 @@ class DesktopClient:
     def __init__(self) -> None:
         self.window = None
         self.tray: pystray.Icon | None = None
+        self._tray_stop = threading.Event()
         self._shutdown_lock = threading.Lock()
         self._shutting_down = False
         self._exit_result: bool | None = None
         self.pending_installer: tuple[Path, str] | None = None
+        self.pending_restart = False
         self._window_visible = "--start-hidden" not in sys.argv
         self._native_activation_hooked = False
         self._notified_tasks = deque(maxlen=256)
@@ -364,6 +365,33 @@ class DesktopClient:
             form.Activated += activated
             self._native_activation_hooked = True
 
+    def _tray_appearance(self) -> tuple[str, str]:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+                light = winreg.QueryValueEx(key, "SystemUsesLightTheme")[0] != 0
+        except OSError:
+            light = True
+        return ("light" if light else "dark", "running" if self.core.service_state == "RUNNING" else "idle")
+
+    @staticmethod
+    def _tray_image(appearance: tuple[str, str]) -> Image.Image:
+        theme, status = appearance
+        with Image.open(BASE_DIR / "desktop_resources" / f"tray-{theme}-{status}.png") as image:
+            return image.convert("RGBA")
+
+    def _monitor_tray(self, previous: tuple[str, str]) -> None:
+        while not self._tray_stop.wait(2):
+            appearance = self._tray_appearance()
+            if self._tray_stop.is_set() or appearance == previous:
+                continue
+            try:
+                if self.tray is not None:
+                    self.tray.icon = self._tray_image(appearance)
+                    self.tray.title = f"{APP_NAME} · " + ("接收服务运行中" if appearance[1] == "running" else "接收服务待机")
+            except Exception:
+                logging.exception("更新托盘图标失败")
+            previous = appearance
+
     def _on_unexpected_core_exit(self, return_code: int, output: str) -> None:
         logging.error("接收核心意外退出，return_code=%s", return_code)
         if self._window_visible:
@@ -374,7 +402,7 @@ class DesktopClient:
             except Exception:
                 logging.exception("更新托盘菜单状态失败")
         detail = output[-2500:] if output else "接收程序已停止，请检查本机诊断日志。"
-        show_message("SendToCopyQ 接收服务已停止", f"接收核心意外退出（代码 {return_code}）。\n\n{detail}")
+        show_message("MoryPaste 接收服务已停止", f"接收核心意外退出（代码 {return_code}）。\n\n{detail}")
 
     def _show_window(self, *_args) -> None:
         window = self.window
@@ -417,7 +445,12 @@ class DesktopClient:
     def _exit_from_tray(self, *_args) -> None:
         threading.Thread(target=self._shutdown, name="sendtocopyq-shutdown", daemon=True).start()
 
-    def _shutdown(self, installer: tuple[Path, str] | None = None) -> bool:
+    def _restart_from_tray(self, *_args) -> None:
+        threading.Thread(
+            target=self._shutdown, kwargs={"restart": True}, name="morypaste-restart", daemon=True
+        ).start()
+
+    def _shutdown(self, installer: tuple[Path, str] | None = None, *, restart: bool = False) -> bool:
         with self._shutdown_lock:
             if self._shutting_down:
                 return False
@@ -433,7 +466,9 @@ class DesktopClient:
                 "桌面客户端没有确认自己启动的接收子进程已退出，因此仍保持运行。请检查日志后重试退出。",
             )
             return False
+        self._tray_stop.set()
         self.pending_installer = installer
+        self.pending_restart = restart
         if self.clipboard_archive and self.clipboard_archive.thread is not None:
             self.clipboard_archive.call("stop")
             self.clipboard_archive.thread.join(timeout=2)
@@ -480,7 +515,7 @@ class DesktopClient:
                 return 2
             except CoreStartupError as exc:
                 logging.error("启动接收核心失败：%s", exc)
-                show_message("SendToCopyQ 启动失败", f"{exc}\n\n桌面日志：{LOG_PATH}")
+                show_message("MoryPaste 启动失败", f"{exc}\n\n桌面日志：{LOG_PATH}")
                 return 2
 
             if self.lan_control_token:
@@ -503,19 +538,21 @@ class DesktopClient:
             self.window.events.minimized += lambda: self._set_window_visible(False)
             self.window.events.restored += lambda: self._set_window_visible(True)
 
-            tray_image = Image.open(TRAY_ICON_PATH).convert("RGBA")
+            appearance = self._tray_appearance()
             self.tray = pystray.Icon(
                 "SendToCopyQ",
-                tray_image,
-                APP_NAME,
+                self._tray_image(appearance),
+                f"{APP_NAME} · " + ("接收服务运行中" if appearance[1] == "running" else "接收服务待机"),
                 menu=pystray.Menu(
-                    pystray.MenuItem("打开 SendToCopyQ", self._show_window, default=True),
+                    pystray.MenuItem("打开 MoryPaste", self._show_window, default=True),
                     pystray.MenuItem(lambda _item: f"接收服务：{self.core.status}", None, enabled=False),
                     pystray.MenuItem("打开诊断", self._open_diagnostics),
+                    pystray.MenuItem("重启 MoryPaste", self._restart_from_tray),
                     pystray.MenuItem("退出程序", self._exit_from_tray),
                 ),
             )
             self.tray.run_detached()
+            threading.Thread(target=self._monitor_tray, args=(appearance,), name="morypaste-tray-status", daemon=True).start()
             if self.clipboard_archive:
                 self.clipboard_archive.start()
             logging.info("桌面客户端就绪；接收核心：%s", self.core.status)
@@ -529,7 +566,7 @@ class DesktopClient:
                 help_text = "\n\n请安装或修复 Microsoft Edge WebView2 Evergreen Runtime 后重试。"
             else:
                 help_text = ""
-            show_message("SendToCopyQ 桌面窗口无法启动", f"{exc}{help_text}\n\n详细日志：{LOG_PATH}")
+            show_message("MoryPaste 桌面窗口无法启动", f"{exc}{help_text}\n\n详细日志：{LOG_PATH}")
             return 2
         finally:
             if not self._shutting_down:
@@ -872,7 +909,7 @@ def main() -> int:
         configure_logging()
         instance = SingleInstance()
     except Exception as exc:
-        show_message("SendToCopyQ 无法启动", str(exc))
+        show_message("MoryPaste 无法启动", str(exc))
         return 2
 
     try:
@@ -884,8 +921,8 @@ def main() -> int:
                 return 0
             if not activate_existing_window():
                 show_message(
-                    "SendToCopyQ 正在后台运行",
-                    "已找到正在运行的客户端，但暂时没有找到主窗口。请稍等片刻，或检查系统托盘中的 SendToCopyQ 图标。",
+                    "MoryPaste 正在后台运行",
+                    "已找到正在运行的客户端，但暂时没有找到主窗口。请稍等片刻，或检查系统托盘中的 MoryPaste 图标。",
                     MB_ICONINFORMATION,
                 )
             return 0
@@ -893,6 +930,20 @@ def main() -> int:
         result = client.run()
     finally:
         instance.close()
+    if result == 0 and client.pending_restart:
+        command = [sys.executable]
+        env = os.environ.copy()
+        if getattr(sys, "frozen", False):
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        else:
+            command.append(str(Path(__file__).resolve()))
+        command.extend(arg for arg in sys.argv[1:] if arg != "--start-hidden")
+        try:
+            subprocess.Popen(command, env=env, cwd=INSTALL_DIR)
+        except OSError as exc:
+            logging.exception("无法重新启动桌面客户端")
+            show_message("无法重启 MoryPaste", f"{exc}\n\n请从原来的入口重新打开 MoryPaste。")
+            return 2
     if result == 0 and client.pending_installer is not None:
         path, digest = client.pending_installer
         try:

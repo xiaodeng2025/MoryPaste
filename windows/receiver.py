@@ -11,6 +11,7 @@ import os
 import queue
 import re
 import secrets
+import select
 import socket
 import sqlite3
 import ssl
@@ -42,6 +43,8 @@ from received_files import MAX_FILE_BYTES, ReceiveStore, category_for, default_r
 
 APP_NAME = "SendToCopyQ"
 TLS_PORT = 47831
+CLIPBOARD_TEXT_MIME = "application/vnd.morypaste.clipboard-text"
+MAX_CLIPBOARD_TEXT_BYTES = 32 * 1024
 DASHBOARD_PORT = 48120
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 PAIRING_TTL_SECONDS = 300
@@ -55,7 +58,7 @@ except Exception as exc:
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DEFAULT_COPYQ_EXE = os.environ.get("COPYQ_EXE", "copyq.exe")
 COPYQ_EXE = Path(DEFAULT_COPYQ_EXE)
-APP_VERSION = "0.6.11"
+APP_VERSION = "0.6.12"
 PROTOCOL_VERSION = "1"
 DIAGNOSTIC_DIR = APP_DATA / "diagnostics"
 DIAGNOSTIC_MAX_FILE = 1024 * 1024
@@ -522,6 +525,7 @@ class State:
         self.last_pairing: dict[str, Any] | None = None
         self.devices_path = app_data_dir() / "paired-devices.json"
         self.devices = self._load_devices()
+        self.clipboard_stream = None
         if self.devices:
             self.last_event["message"] = f"接收端已就绪，已记住 {len(self.devices)} 台配对设备"
 
@@ -549,6 +553,26 @@ class State:
         temp = self.devices_path.with_suffix(".tmp")
         temp.write_text(json.dumps(self.devices, ensure_ascii=False, indent=2), "utf-8")
         os.replace(temp, self.devices_path)
+
+    def set_clipboard_target(self, device_id: str | None) -> bool:
+        with self.lock:
+            if device_id is not None and device_id not in self.devices:
+                return False
+            original = self.devices
+            updated = {key: dict(value) for key, value in original.items()}
+            for key, device in updated.items():
+                device.pop("clipboardSync", None)
+                if key == device_id:
+                    device["clipboardSync"] = True
+            self.devices = updated
+            try:
+                self.save_devices()
+            except OSError:
+                self.devices = original
+                raise
+            self.clipboard_stream = None
+            return True
+
 
     def revoke_device(self, device_id: str) -> bool:
         with self.lock:
@@ -1127,7 +1151,11 @@ class _NativeClipboardWorker:
                 pixels = None
                 try:
                     api = _NativeClipboardApi(job["task_id"], job["image_index"], job["image_count"])
-                    if "paths" in job:
+                    if "text" in job:
+                        exclusion = api.call("RegisterClipboardFormatW", "ExcludeClipboardContentFromMonitorProcessing", stage="prepare")
+                        _publish_clipboard_payloads(api, hwnd, {exclusion: b"\0", 13: job["text"]})
+                        job["result"] = ["CF_UNICODETEXT"]
+                    elif "paths" in job:
                         payload = file_drop_payload(job["paths"])
                         drop_effect = api.call("RegisterClipboardFormatW", "Preferred DropEffect", stage="prepare")
                         _publish_clipboard_payloads(api, hwnd, {15: payload, drop_effect: struct.pack("<I", 1)})
@@ -1141,6 +1169,7 @@ class _NativeClipboardWorker:
                 finally:
                     pixels = None
                     job.pop("data", None)
+                    job.pop("text", None)
                     job["done"].set()
                     del job
         finally:
@@ -1279,6 +1308,7 @@ class TransferHandler(QuietHandler):
                 "computerName": self.state.computer_name,
                 "protocolVersion": int(PROTOCOL_VERSION),
                 "fileReceive": True,
+                "clipboardTextReceive": True,
             })
         else:
             self.reply(404, {"error": "not found"})
@@ -1289,10 +1319,121 @@ class TransferHandler(QuietHandler):
             self.handle_pair_claim()
         elif parsed.path == "/upload":
             self.handle_upload()
+        elif parsed.path == "/clipboard/text":
+            self.handle_clipboard_text()
+        elif parsed.path == "/clipboard/subscribe":
+            self.handle_clipboard_subscribe()
         elif parsed.path == "/receive":
             self.handle_file_receive()
         else:
             self.reply(404, {"error": "not found"})
+
+    def handle_clipboard_text(self) -> None:
+        if self.headers.get("Content-Type") != CLIPBOARD_TEXT_MIME:
+            self.reply(415, {"error": "只接受纯文字。"})
+            return
+        length_header = self.headers.get("Content-Length", "")
+        if not length_header.isascii() or not length_header.isdecimal() or len(length_header) > 6:
+            self.reply(400, {"error": "文字长度无效。"})
+            return
+        length = int(length_header)
+        if not 0 < length <= MAX_CLIPBOARD_TEXT_BYTES:
+            self.reply(413, {"error": "文字大小无效或超过 32 KiB。"})
+            return
+        identity = self.state.authenticate(self.headers, CLIPBOARD_TEXT_MIME, length)
+        if not identity:
+            self.reply(401, {"error": "设备授权已失效，请重新配对。"})
+            return
+        self.connection.settimeout(5)
+        try:
+            body = self.rfile.read(length)
+        except OSError:
+            self.reply(408, {"error": "接收文字超时。"})
+            return
+        device_id, expected_hash = identity[:2]
+        if len(body) != length or not hmac.compare_digest(hashlib.sha256(body).digest(), expected_hash):
+            self.reply(400, {"error": "收到的文字不完整。"})
+            return
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            self.reply(400, {"error": "收到的文字编码无效。"})
+            return
+        if "\0" in text:
+            self.reply(400, {"error": "文字包含不支持的字符。"})
+            return
+        with self.state.lock:
+            authorized = device_id in self.state.devices
+        if not authorized:
+            self.reply(401, {"error": "设备授权已失效，请重新配对。"})
+            return
+        try:
+            _run_clipboard_job({"text": text.encode("utf-16-le") + b"\0\0", "task_id": None,
+                                "image_index": 1, "image_count": 1})
+        except (OSError, RuntimeError):
+            self.reply(503, {"error": "电脑剪贴板暂时不可用，请再试一次。"})
+            return
+        self.reply(200, {"ok": True})
+
+    def handle_clipboard_subscribe(self) -> None:
+        from clipboard_sync import ClipboardSyncReader
+
+        mime = "application/vnd.morypaste.clipboard-subscription"
+        if self.headers.get("Content-Type") != mime or self.headers.get("Content-Length") != "0":
+            self.reply(400, {"error": "invalid clipboard subscription"})
+            return
+        identity = self.state.authenticate(self.headers, mime, 0)
+        if not identity or identity[1] != hashlib.sha256(b"").digest():
+            self.reply(401, {"error": "unauthorized"})
+            return
+        device_id = identity[0]
+        stream = (object(), device_id)
+
+        def authorized():
+            return bool(self.state.devices.get(device_id, {}).get("clipboardSync") is True)
+
+        with self.state.lock:
+            if not authorized():
+                self.reply(403, {"error": "clipboard sync disabled"})
+                return
+            self.state.clipboard_stream = stream
+        try:
+            reader = ClipboardSyncReader()
+            self.connection.settimeout(3)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            desktop_event("devices")
+            heartbeat = 0.0
+            while not self.state.stop_event.wait(0.1):
+                with self.state.lock:
+                    if not authorized() or self.state.clipboard_stream is not stream:
+                        break
+                readable, _, _ = select.select([self.connection], [], [], 0)
+                if readable:
+                    # The request is complete. Read only to process TLS close or EOF.
+                    self.connection.recv(1)
+                    break
+                text = reader.next_text()
+                now = time.monotonic()
+                if text is None and now < heartbeat:
+                    continue
+                packet = json.dumps({"text": text}, ensure_ascii=True).encode("ascii") + b"\n"
+                with self.state.lock:
+                    if not authorized() or self.state.clipboard_stream is not stream:
+                        break
+                    self.wfile.write(packet)
+                heartbeat = now + 4
+        except OSError:
+            pass
+        finally:
+            with self.state.lock:
+                if self.state.clipboard_stream is stream:
+                    self.state.clipboard_stream = None
+            desktop_event("devices")
+
 
     def handle_pair_claim(self) -> None:
         value = self.read_json()
@@ -1550,8 +1691,15 @@ class DashboardHandler(QuietHandler):
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == "/api/state":
             with self.state.lock:
+                stream = self.state.clipboard_stream
                 devices = [
-                    {"id": key, "name": item.get("name", "Android device"), "created": item.get("created", "")}
+                    {
+                        "id": key,
+                        "name": item.get("name", "Android device"),
+                        "created": item.get("created", ""),
+                        "clipboardSync": item.get("clipboardSync") is True,
+                        "clipboardConnected": item.get("clipboardSync") is True and stream is not None and stream[1] == key,
+                    }
                     for key, item in self.state.devices.items()
                 ]
                 result = {
@@ -1685,6 +1833,24 @@ class DashboardHandler(QuietHandler):
                 self.reply(200, {"ok": True, "copyqPath": str(candidate), "copyqVersion": version})
             except (ValueError, OSError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
                 self.reply(400, {"error": str(exc) or "CopyQ 检查失败。"})
+            return
+        if parsed.path == "/api/clipboard-target":
+            origin = self.headers.get("Origin", "")
+            if (origin and origin != f"http://127.0.0.1:{DASHBOARD_PORT}") or self.headers.get_content_type() != "application/json":
+                self.reply(400, {"error": "无效请求。"})
+                return
+            value = self.read_json(1024)
+            if value is None or "deviceId" not in value or (value["deviceId"] is not None and not isinstance(value["deviceId"], str)):
+                self.reply(400, {"error": "无效手机。"})
+                return
+            try:
+                if not self.state.set_clipboard_target(value["deviceId"]):
+                    self.reply(404, {"error": "找不到已配对的手机。"})
+                    return
+            except OSError:
+                self.reply(500, {"error": "无法保存剪贴板同步设置。"})
+                return
+            self.reply(200, {"ok": True})
             return
         if parsed.path == "/api/revoke":
             try:

@@ -264,6 +264,30 @@ class DesktopLifecycleTests(unittest.TestCase):
         client.window.destroy.assert_called_once()
         self.assertTrue(client._shutting_down)
 
+    def test_restart_launches_same_test_executable_after_releasing_single_instance(self) -> None:
+        import desktop_app
+
+        lifecycle = Mock()
+        lifecycle.instance.already_running = False
+        lifecycle.client.run.return_value = 0
+        lifecycle.client.pending_restart = True
+        lifecycle.client.pending_installer = None
+        path = r"C:\test\SendToCopyQ.exe"
+        with patch.object(desktop_app, "SingleInstance", return_value=lifecycle.instance), \
+             patch.object(desktop_app, "DesktopClient", return_value=lifecycle.client), \
+             patch.object(desktop_app, "configure_logging"), \
+             patch.object(desktop_app.sys, "frozen", True, create=True), \
+             patch.object(desktop_app.sys, "executable", path), \
+             patch.object(desktop_app.sys, "argv", [path, "--start-hidden"]), \
+             patch.dict(desktop_app.os.environ, {"SENDTOCOPYQ_DATA_DIR": "isolated-profile"}), \
+             patch.object(desktop_app.subprocess, "Popen", lifecycle.launch):
+            self.assertEqual(desktop_app.main(), 0)
+        self.assertEqual([entry[0] for entry in lifecycle.mock_calls], ["client.run", "instance.close", "launch"])
+        args, options = lifecycle.launch.call_args
+        self.assertEqual(args, ([path],))
+        self.assertEqual(options["env"]["SENDTOCOPYQ_DATA_DIR"], "isolated-profile")
+        self.assertEqual(options["env"]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+
     def test_failed_core_exit_keeps_tray_and_window_alive(self) -> None:
         client = DesktopClient()
         client.core = Mock()
@@ -272,7 +296,8 @@ class DesktopLifecycleTests(unittest.TestCase):
         client.tray = Mock()
         client.window = Mock()
         with patch("desktop_app.show_message"):
-            client._shutdown()
+            client._shutdown(restart=True)
+        self.assertFalse(client.pending_restart)
         client.core.stop.assert_called_once()
         client.tray.stop.assert_not_called()
         client.window.destroy.assert_not_called()
