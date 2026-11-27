@@ -2,6 +2,13 @@
 
 正式版的安装包、SHA-256 和更新说明见对应 Release。待办项的进度以对应 Issue 为准。
 
+## 0.6.12
+
+- 新增电脑到手机的自动文字剪贴板同步，以及手机到电脑的一键发送。需搭配 Android 0.5.10 或更新版本。
+- 更新 Windows 界面和图标，托盘支持查看接收状态和重启。
+
+[Windows 0.6.12](https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.12) · [Android 0.5.10](https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.10)
+
 ## 0.6.11 · 2026-11-24
 
 - Windows 剪贴板页新增可选的本地历史，通过快捷键查看并按原格式粘贴。

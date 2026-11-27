@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MoryPaste 通过局域网将 Android 手机的图片、视频和文件发送到 Windows。截图发到电脑，直接 Ctrl+V。支持双向剪贴板文字传送。">
+  <meta name="theme-color" content="#f7f9fe">
+  <title>MoryPaste · 手机截图发到电脑，直接粘贴</title>
+  <link rel="icon" href="assets/morypaste-icon.png" type="image/png">
+  <link rel="stylesheet" href="site.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "@id": "https://morypaste.morydeng.chatgpt.site/#app",
+    "name": "MoryPaste",
+    "url": "https://morypaste.morydeng.chatgpt.site/",
+    "description": "通过局域网将 Android 手机的图片、视频和文件发送到 Windows。接收的图片可直接粘贴，并支持 Android 与 Windows 双向传送剪贴板文字。",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": ["Android", "Windows"],
+    "sameAs": "https://github.com/xiaodeng2025/MoryPaste",
+    "downloadUrl": [
+      "https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.12/MoryPaste-0.6.12-Setup.exe",
+      "https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.10/MoryPaste-Android-0.5.10.apk"
+    ]
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="#" class="wordmark" aria-label="MoryPaste 首页">MoryPaste</a>
+      <nav aria-label="主导航">
+        <a href="#how">如何使用</a>
+        <a href="#features">功能</a>
+        <a href="https://github.com/xiaodeng2025/MoryPaste/releases">更新记录</a>
+      </nav>
+      <a class="header-download" href="#download">下载</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">手机截图发到电脑，<br><span>直接 Ctrl+V。</span></h1>
+        <p>用 Android 的系统分享，把图片、视频和文件发到 Windows。还可以在手机和电脑之间收发剪贴板文字。两端在同一局域网，扫码配对后即可使用。</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.12/MoryPaste-0.6.12-Setup.exe">下载 Windows</a>
+          <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.10/MoryPaste-Android-0.5.10.apk">下载 Android</a>
+        </div>
+        <p class="hero-meta">安装包由 GitHub 提供</p>
+      </div>
+
+      <figure class="showcase" aria-label="操作示意。手机在分享面板点击发送到电脑，Windows 收到截图后可直接粘贴。">
+        <div class="showcase-stage" aria-hidden="true">
+          <div class="pc">
+            <div class="pc-bar"><i></i><i></i><i></i><span>MoryPaste</span></div>
+            <div class="pc-body">
+              <div class="pc-heading">最近接收</div>
+              <div class="receipt">
+                <div class="file-symbol">PNG</div>
+                <div><strong>截图.png</strong><small>图片 · 已保存</small></div>
+              </div>
+              <div class="clipboard"><span>已写入剪贴板</span><kbd>Ctrl</kbd><b>+</b><kbd>V</kbd></div>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="phone-screen">
+              <div class="phone-camera"></div>
+              <div class="phone-picture"><div></div></div>
+              <div class="phone-sheet">
+                <div class="sheet-handle"></div>
+                <strong>发送到电脑</strong>
+                <small>将发送 1 张图片</small>
+                <div class="device"><span><i></i>我的电脑</span><b>发送</b></div>
+                <div class="phone-home"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption>操作示意</figcaption>
+      </figure>
+    </section>
+
+    <section class="section wrap" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">三步开始使用</h2>
+      <ol class="steps">
+        <li><h3>安装两端</h3><p>在 Windows 和 Android 上安装 MoryPaste，并连接到同一局域网。</p></li>
+        <li><h3>扫码配对</h3><p>在电脑上点「添加手机」。如果 Windows 请求授权，确认后用手机 App 扫码。</p></li>
+        <li><h3>从系统分享发送</h3><p>在手机上打开图片、视频或文件，点分享，选择「发送到电脑」，再确认目标。</p></li>
+      </ol>
+    </section>
+
+    <section class="section feature-section wrap" id="features" aria-labelledby="feature-title">
+      <h2 id="feature-title">接收之后，顺手就能用</h2>
+      <div class="features">
+        <article class="feature paste">
+          <div class="feature-visual" aria-hidden="true"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd></div>
+          <div><h3>图片直接粘贴</h3><p>截图或照片接收后会保存到电脑，并写入剪贴板。切到支持图片粘贴的应用，按 Ctrl+V 就能用。</p></div>
+        </article>
+        <article class="feature files">
+          <div class="feature-visual file-visual" aria-hidden="true"><span>MP4</span><span>PDF</span><span>ZIP</span></div>
+          <div><h3>视频和文件自动保存</h3><p>接收的内容按类型保存。需要找文件时，从首页打开「接收目录」。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section feature-section wrap" id="clipboard-sync">
+      <h2>手机与电脑互传剪贴板文字</h2>
+      <p>需要 Windows 0.6.12 和 Android 0.5.10 或更新版本。两端连到同一局域网并完成配对。</p>
+      <ul>
+        <li><strong>电脑到手机</strong>：手机开启接收后，在电脑复制文字，手机可直接粘贴。</li>
+        <li><strong>手机到电脑</strong>：手机复制文字后，从已配对的电脑卡片、桌面快捷图标或系统下拉面板一键发送，到电脑直接粘贴。</li>
+      </ul>
+    </section>
+
+    <section class="section wrap" id="download" aria-labelledby="download-title">
+      <div class="download-panel">
+        <div><h2 id="download-title">下载 MoryPaste</h2><p>先装电脑端和手机端，再扫码配对。</p></div>
+        <div class="download-side">
+          <div class="actions">
+            <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.12">Windows 0.6.12</a>
+            <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.10">Android 0.5.10</a>
+          </div>
+          <p class="download-note">Windows 安装包尚未签名，可能遇到系统拦截。 <a href="https://github.com/xiaodeng2025/MoryPaste/issues/5">查看说明</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap site-footer">
+    <a href="#" class="wordmark">MoryPaste</a>
+    <div>
+      <a href="https://github.com/xiaodeng2025/MoryPaste/releases">更新记录</a>
+      <a href="https://github.com/xiaodeng2025/MoryPaste">查看源码</a>
+      <a href="https://github.com/xiaodeng2025/MoryPaste/issues">问题反馈</a>
+      <a href="ai-instructions/">AI Instructions</a>
+      <a class="contact-email" href="mailto:hermesdesktop@agent.qq.com">hermesdesktop@agent.qq.com</a>
+    </div>
+  </footer>
+</body>
+</html>
