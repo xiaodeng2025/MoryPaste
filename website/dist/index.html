@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="MoryPaste 通过局域网将 Android 手机的图片、视频和文件发送到 Windows。截图发到电脑，直接 Ctrl+V。支持双向剪贴板文字传送。">
+  <meta name="description" content="MoryPaste 通过局域网在 Android 手机和 Windows 电脑之间互传文件与剪贴板文字。手机截图发送到电脑后，可直接粘贴。">
   <meta name="theme-color" content="#f7f9fe">
   <title>MoryPaste · 手机截图发到电脑，直接粘贴</title>
   <link rel="icon" href="assets/morypaste-icon.png" type="image/png">
@@ -15,13 +15,13 @@
     "@id": "https://morypaste.morydeng.chatgpt.site/#app",
     "name": "MoryPaste",
     "url": "https://morypaste.morydeng.chatgpt.site/",
-    "description": "通过局域网将 Android 手机的图片、视频和文件发送到 Windows。接收的图片可直接粘贴，并支持 Android 与 Windows 双向传送剪贴板文字。",
+    "description": "MoryPaste 通过局域网在 Android 手机和 Windows 电脑之间互传文件与剪贴板文字。手机截图发送到电脑后，可直接粘贴。",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": ["Android", "Windows"],
     "sameAs": "https://github.com/xiaodeng2025/MoryPaste",
     "downloadUrl": [
-      "https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.12/MoryPaste-0.6.12-Setup.exe",
-      "https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.10/MoryPaste-Android-0.5.10.apk"
+      "https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.13/MoryPaste-0.6.13-Setup.exe",
+      "https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.11/MoryPaste-Android-0.5.11.apk"
     ]
   }
   </script>
@@ -43,10 +43,10 @@
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
         <h1 id="hero-title">手机截图发到电脑，<br><span>直接 Ctrl+V。</span></h1>
-        <p>用 Android 的系统分享，把图片、视频和文件发到 Windows。还可以在手机和电脑之间收发剪贴板文字。两端在同一局域网，扫码配对后即可使用。</p>
+        <p>用 Android 的系统分享，把图片、视频和文件发到 Windows。也能从电脑把文件发回手机，并在两端收发剪贴板文字。两端在同一局域网，扫码配对后即可使用。</p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.12/MoryPaste-0.6.12-Setup.exe">下载 Windows</a>
-          <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.10/MoryPaste-Android-0.5.10.apk">下载 Android</a>
+          <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/v0.6.13/MoryPaste-0.6.13-Setup.exe">下载 Windows</a>
+          <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/download/android-v0.5.11/MoryPaste-Android-0.5.11.apk">下载 Android</a>
         </div>
         <p class="hero-meta">安装包由 GitHub 提供</p>
       </div>
@@ -105,6 +105,12 @@
       </div>
     </section>
 
+    <section class="section feature-section wrap" id="send-to-phone">
+      <h2>电脑也能发送文件到手机</h2>
+      <p>需要 Windows 0.6.13 和 Android 0.5.11 或更新版本。两端配对并连到同一局域网后，在电脑首页找到已授权的手机，点「发送文件」并选档。手机确认接受后才开始传输，完成后可打开保存文件夹。</p>
+      <p>也可在 Android 开启「后台接收文件」。授予显示在其他应用上层的权限后，手机解锁时可直接接受或拒绝。</p>
+    </section>
+
     <section class="section feature-section wrap" id="clipboard-sync">
       <h2>手机与电脑互传剪贴板文字</h2>
       <p>需要 Windows 0.6.12 和 Android 0.5.10 或更新版本。两端连到同一局域网并完成配对。</p>
@@ -119,8 +125,8 @@
         <div><h2 id="download-title">下载 MoryPaste</h2><p>先装电脑端和手机端，再扫码配对。</p></div>
         <div class="download-side">
           <div class="actions">
-            <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.12">Windows 0.6.12</a>
-            <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.10">Android 0.5.10</a>
+            <a class="button primary" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.13">Windows 0.6.13</a>
+            <a class="button" href="https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.11">Android 0.5.11</a>
           </div>
           <p class="download-note">Windows 安装包尚未签名，可能遇到系统拦截。 <a href="https://github.com/xiaodeng2025/MoryPaste/issues/5">查看说明</a></p>
         </div>
