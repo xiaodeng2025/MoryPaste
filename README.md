@@ -9,7 +9,7 @@ MoryPaste 通过局域网把 Android 手机上的图片、视频和文件发送�
 | 平台 | 下载入口 |
 | --- | --- |
 | Windows | [下载最新安装包](https://github.com/xiaodeng2025/MoryPaste/releases/latest) |
-| Android | [下载正式版 APK](https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.10) |
+| Android | [下载正式版 APK](https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.11) |
 
 Windows 安装包目前未签名，开启智能应用控制的电脑可能遇到 [安装拦截（错误 4551）](https://github.com/xiaodeng2025/MoryPaste/issues/5)。
 
