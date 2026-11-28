@@ -58,7 +58,7 @@ except Exception as exc:
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DEFAULT_COPYQ_EXE = os.environ.get("COPYQ_EXE", "copyq.exe")
 COPYQ_EXE = Path(DEFAULT_COPYQ_EXE)
-APP_VERSION = "0.6.12"
+APP_VERSION = "0.6.13"
 PROTOCOL_VERSION = "1"
 DIAGNOSTIC_DIR = APP_DATA / "diagnostics"
 DIAGNOSTIC_MAX_FILE = 1024 * 1024
@@ -526,6 +526,8 @@ class State:
         self.devices_path = app_data_dir() / "paired-devices.json"
         self.devices = self._load_devices()
         self.clipboard_stream = None
+        self.outgoing = {}
+        self.outgoing_token = ""
         if self.devices:
             self.last_event["message"] = f"接收端已就绪，已记住 {len(self.devices)} 台配对设备"
 
@@ -585,6 +587,7 @@ class State:
             except Exception:
                 self.devices = original
                 raise
+            self.outgoing.pop(device_id, None)
             return True
 
     def issue_pair_code(self) -> tuple[str, str]:
@@ -1323,10 +1326,126 @@ class TransferHandler(QuietHandler):
             self.handle_clipboard_text()
         elif parsed.path == "/clipboard/subscribe":
             self.handle_clipboard_subscribe()
+        elif parsed.path == "/outgoing":
+            self.handle_outgoing()
         elif parsed.path == "/receive":
             self.handle_file_receive()
         else:
             self.reply(404, {"error": "not found"})
+
+    def handle_outgoing(self) -> None:
+        mime = "application/vnd.morypaste.outgoing"
+        if self.headers.get("Content-Type") != mime:
+            self.reply(415, {"error": "invalid content type"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+        except ValueError:
+            length = -1
+        if not 0 < length <= 1024:
+            self.reply(400, {"error": "invalid length"})
+            return
+        identity = self.state.authenticate(self.headers, mime, length)
+        if not identity:
+            self.reply(401, {"error": "unauthorized"})
+            return
+        self.connection.settimeout(10)
+        body = self.rfile.read(length)
+        try:
+            value = json.loads(body)
+            if not isinstance(value, dict) or hashlib.sha256(body).digest() != identity[1]:
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            self.reply(400, {"error": "invalid body"})
+            return
+        device_id = identity[0]
+        action = value.get("action")
+        with self.state.lock:
+            transfer = outgoing_status(self.state, device_id, time.monotonic())
+            if device_id not in self.state.devices:
+                status, result = 401, {"error": "unauthorized"}
+            elif action == "poll":
+                offer = None
+                if transfer and transfer["status"] == "waiting":
+                    offer = {"id": transfer["id"], "files": [
+                        {"name": path.name, "size": size} for path, size, _ in transfer["files"]
+                    ]}
+                status, result = 200, {"offer": offer}
+            elif not transfer or transfer["id"] != value.get("id"):
+                status, result = 409, {"error": "传送已失效"}
+            else:
+                status, result = self.update_outgoing(transfer, action, value)
+        if result is None:
+            self.stream_outgoing(device_id, transfer)
+        else:
+            self.reply(status, result)
+
+    def update_outgoing(self, transfer, action, value):
+        status = transfer["status"]
+        if status == "waiting" and action in ("accept", "reject"):
+            transfer["status"] = "sending" if action == "accept" else "rejected"
+        elif status == "sending" and transfer["streaming"] and action in ("download", "complete"):
+            return 425, {"error": "文件仍在传送"}
+        elif status == "sending" and action == "download":
+            index = value.get("index")
+            if type(index) is int and index == transfer["index"] and index < len(transfer["files"]):
+                transfer["streaming"] = True
+                return 200, None
+            return 409, {"error": "文件顺序无效"}
+        elif status == "sending" and action == "complete" and transfer["index"] == len(transfer["files"]):
+            transfer["status"] = "complete"
+        elif status == "sending" and action == "fail":
+            transfer["status"] = "failed"
+        elif status == "complete" and action == "complete":
+            return 200, {"ok": True}
+        else:
+            return 409, {"error": "传送已结束或操作无效"}
+        transfer["updated"] = time.monotonic()
+        desktop_event("devices")
+        return 200, {"ok": True}
+
+    def stream_outgoing(self, device_id, transfer):
+        path, size, modified = transfer["files"][transfer["index"]]
+        headers_sent = False
+        try:
+            with path.open("rb") as source:
+                stat = os.fstat(source.fileno())
+                if (stat.st_size, stat.st_mtime_ns) != (size, modified):
+                    raise OSError("file changed")
+                headers_sent = True
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(size))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                remaining = size
+                next_update = 0
+                while remaining:
+                    with self.state.lock:
+                        if device_id not in self.state.devices or transfer["status"] != "sending":
+                            raise OSError("transfer canceled")
+                    chunk = source.read(min(128 * 1024, remaining))
+                    if not chunk:
+                        raise OSError("file truncated")
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+                    with self.state.lock:
+                        transfer["sent"] += len(chunk)
+                        transfer["updated"] = time.monotonic()
+                        if transfer["updated"] >= next_update:
+                            desktop_event("devices")
+                            next_update = transfer["updated"] + 0.5
+            with self.state.lock:
+                transfer["index"] += 1
+        except OSError:
+            with self.state.lock:
+                transfer["status"] = "failed"
+            if not headers_sent:
+                self.reply(409, {"error": "电脑无法读取文件，文件可能已被移动或修改。"})
+        finally:
+            with self.state.lock:
+                transfer["streaming"] = False
+            desktop_event("devices")
 
     def handle_clipboard_text(self) -> None:
         if self.headers.get("Content-Type") != CLIPBOARD_TEXT_MIME:
@@ -1678,8 +1797,82 @@ class TransferHandler(QuietHandler):
         return
 
 
+OUTGOING_CONFIRM_SECONDS = 90
+OUTGOING_IDLE_SECONDS = 60
+OUTGOING_RESULT_SECONDS = 10
+
+
+def outgoing_status(state, device_id, now):
+    transfer = state.outgoing.get(device_id)
+    if transfer and transfer["status"] in ("waiting", "sending"):
+        limit = OUTGOING_CONFIRM_SECONDS if transfer["status"] == "waiting" else OUTGOING_IDLE_SECONDS
+        if now - transfer["updated"] >= limit:
+            transfer["status"] = "timeout" if transfer["status"] == "waiting" else "failed"
+    return transfer
+
+
 class DashboardHandler(QuietHandler):
     state: State
+
+    def outgoing_summary(self, device_id):
+        now = time.monotonic()
+        transfer = outgoing_status(self.state, device_id, now)
+        if transfer is None:
+            return None
+        status = transfer["status"]
+        age = now - transfer["updated"]
+        if status in ("complete", "rejected") and age >= OUTGOING_RESULT_SECONDS:
+            return None
+        result = {key: transfer[key] for key in ("id", "status", "sent", "total")}
+        if status == "waiting":
+            result["remainingMs"] = max(0, round((OUTGOING_CONFIRM_SECONDS - age) * 1000))
+        if status == "sending":
+            result["saving"] = transfer["index"] == len(transfer["files"])
+        return result
+
+    def start_outgoing(self):
+        token = self.state.outgoing_token
+        if not token or not hmac.compare_digest(
+            self.headers.get("X-MoryPaste-Lan-Control", "").encode("utf-8"), token.encode("utf-8")
+        ):
+            self.reply(403, {"error": "本机文件发送请求未获授权。"})
+            return
+        if self.state.lan.state_name != "running":
+            self.reply(409, {"error": "请先启动局域网接收服务。"})
+            return
+        value = self.read_json(512 * 1024)
+        try:
+            device_id = value["deviceId"]
+            paths = value["paths"]
+            if not isinstance(device_id, str) or not isinstance(paths, list) or not 1 <= len(paths) <= 20:
+                raise ValueError()
+            files = []
+            for entry in paths:
+                path = Path(entry)
+                if not path.is_absolute() or not path.is_file():
+                    raise ValueError()
+                stat = path.stat()
+                if stat.st_size > MAX_FILE_BYTES:
+                    raise ValueError()
+                files.append((path, stat.st_size, stat.st_mtime_ns))
+        except (TypeError, KeyError, ValueError, OSError):
+            self.reply(400, {"error": "请选择 1–20 个可读文件，单个文件最多 4 GiB。"})
+            return
+        with self.state.lock:
+            current = outgoing_status(self.state, device_id, time.monotonic())
+            if device_id not in self.state.devices:
+                status, result = 404, {"error": "找不到已配对的手机。"}
+            elif current and current["status"] in ("waiting", "sending"):
+                status, result = 409, {"error": "这台手机已有一项传送。"}
+            else:
+                self.state.outgoing[device_id] = {
+                    "id": str(uuid.uuid4()), "files": files, "status": "waiting",
+                    "updated": time.monotonic(), "index": 0, "streaming": False,
+                    "sent": 0, "total": sum(size for _, size, _ in files),
+                }
+                status, result = 200, {"ok": True}
+        self.reply(status, result)
+        desktop_event("devices")
 
     def _local_only(self) -> bool:
         return self.client_address[0] in ("127.0.0.1", "::1")
@@ -1697,6 +1890,7 @@ class DashboardHandler(QuietHandler):
                         "id": key,
                         "name": item.get("name", "Android device"),
                         "created": item.get("created", ""),
+                        "outgoing": self.outgoing_summary(key),
                         "clipboardSync": item.get("clipboardSync") is True,
                         "clipboardConnected": item.get("clipboardSync") is True and stream is not None and stream[1] == key,
                     }
@@ -1774,6 +1968,9 @@ class DashboardHandler(QuietHandler):
             self.reply(403, {"error": "local only"})
             return
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/api/local/outgoing":
+            self.start_outgoing()
+            return
         if parsed.path in ("/api/local/lan-network", "/api/local/lan-start"):
             lan = getattr(self.state, "lan", None)
             if not lan or not lan.token or not hmac.compare_digest(
@@ -1997,7 +2194,13 @@ class LanReceiver:
 
 def serve() -> int:
     global COPYQ_EXE
+    # The desktop reads the frozen receiver's redirected output as UTF-8.
+    # PyInstaller can ignore Python's encoding environment variables.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     lan_token = os.environ.pop("MORYPASTE_LAN_CONTROL", "")
+    outgoing_token = os.environ.pop("MORYPASTE_OUTGOING_CONTROL", "")
     try:
         load_settings()
         try:
@@ -2014,6 +2217,7 @@ def serve() -> int:
     print(f"接收核心实际数据目录：{APP_DATA}", flush=True)
     state = State(bind_ip, interface, fingerprint, interface_index)
     state.lan = LanReceiver(state, cert_path, key_path, lan_token)
+    state.outgoing_token = outgoing_token
     if lan_token:
         state.discovery_status = "waiting"
     try:

@@ -37,13 +37,20 @@ class LanAuthorizationTests(unittest.TestCase):
 
     @patch("desktop_app.firewall_access.get_status", return_value={"authorized": False})
     def test_add_phone_authorizes_before_listening(self, _status):
-        def authorize(_path, _interface):
+        def authorize(_path, _interface, *, on_progress):
             self.api._lan_request.assert_called_once_with("network", {})
+            on_progress("windows")
+            on_progress("verify")
             return {"authorized": True}
 
         with patch("desktop_app.firewall_access.authorize", side_effect=authorize) as elevation:
             self.assertTrue(self.api.authorize_firewall()["serviceReady"])
-        elevation.assert_called_once_with(self.client.core.packaged_executable, "Test")
+        self.assertEqual(elevation.call_args.args, (self.client.core.packaged_executable, "Test"))
+        self.assertEqual([call.args for call in self.client._send_window_event.call_args_list], [
+            ("morypastePairProgress", "windows"),
+            ("morypastePairProgress", "verify"),
+            ("morypastePairProgress", "start"),
+        ])
         self.assertEqual(self.api._lan_request.call_args.args, ("start", self.network))
 
     @patch("desktop_app.firewall_access.get_status", return_value={"authorized": False})

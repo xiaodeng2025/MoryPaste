@@ -239,7 +239,8 @@ class ReceiverProcessManager:
                 # this retry. Probe again instead of surfacing a stale timeout.
                 time.sleep(min(0.25, max(0.01, deadline - time.monotonic())))
 
-    def start(self, timeout: float = 25.0, *, lan_control_token: str | None = None) -> dict[str, Any]:
+    def start(self, timeout: float = 25.0, *, lan_control_token: str | None = None,
+              outgoing_token: str | None = None) -> dict[str, Any]:
         if self.process is not None:
             raise ReceiverError("接收核心已经由当前桌面客户端启动。")
         command = self._build_command()
@@ -252,6 +253,9 @@ class ReceiverProcessManager:
 
         env = child_environment(resolve_data_dir())
         env.pop("MORYPASTE_LAN_CONTROL", None)
+        env.pop("MORYPASTE_OUTGOING_CONTROL", None)
+        if outgoing_token is not None:
+            env["MORYPASTE_OUTGOING_CONTROL"] = outgoing_token
         if lan_control_token is not None:
             env["MORYPASTE_LAN_CONTROL"] = lan_control_token
         try:

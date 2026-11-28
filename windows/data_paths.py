@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+TEST_DIRECTORIES = frozenset(("SendToCopyQ-PairingTest", "SendToCopyQ-PairingProgressTest"))
+
 
 def resolve_data_dir(env=None, resource_dir=None):
     env = os.environ if env is None else env
@@ -13,9 +15,10 @@ def resolve_data_dir(env=None, resource_dir=None):
     marker = resource_dir / 'test-data-profile.json'
     if marker.exists():
         profile = json.loads(marker.read_text('utf-8'))
-        expected = (main.parent / profile['directory']).resolve()
-        if profile['directory'] != 'SendToCopyQ-PairingTest' or not configured:
+        directory = profile.get('directory')
+        if directory not in TEST_DIRECTORIES or not configured:
             raise RuntimeError('测试版缺少隔离配置。请使用 Start-SendToCopyQ-Test.bat 启动。')
+        expected = (main.parent / directory).resolve()
         selected = Path(configured)
         if not selected.is_absolute() or selected.resolve() != expected or selected.resolve() == main:
             raise RuntimeError('测试数据目录不正确，已阻止访问主线数据。')

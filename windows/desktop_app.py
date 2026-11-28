@@ -288,6 +288,7 @@ class DesktopClient:
         self._notified_tasks = deque(maxlen=256)
         packaged_receiver = INSTALL_DIR / "receiver" / "SendToCopyQ-Receiver.exe" if getattr(sys, "frozen", False) else None
         self.lan_control_token = uuid.uuid4().hex if packaged_receiver is not None else None
+        self.outgoing_token = uuid.uuid4().hex
         self.core = ReceiverProcessManager(
             BASE_DIR / "receiver.py", self._on_unexpected_core_exit, packaged_executable=packaged_receiver,
             on_event=self._on_core_event,
@@ -507,7 +508,9 @@ class DesktopClient:
                     return 2
             logging.info("已检测到 WebView2 Runtime %s", runtime_version)
             try:
-                network = self.core.start(lan_control_token=self.lan_control_token)
+                network = self.core.start(
+                    lan_control_token=self.lan_control_token, outgoing_token=self.outgoing_token,
+                )
             except ExistingReceiverError as exc:
                 logging.warning("检测到既有接收端：%s", exc)
                 title = "接收端已在运行" if exc.state else "无法确认接收端状态"
@@ -591,11 +594,26 @@ class DesktopApi:
         with opener.open(DASHBOARD_URL + "api/state", timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def send_files(self, device_id: str) -> dict:
+        paths = self._client.window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True)
+        if not paths:
+            return {"canceled": True}
+        try:
+            return self._local_receiver_request("outgoing", {"deviceId": device_id, "paths": paths})
+        except (ValueError, OSError) as exc:
+            return {"error": str(exc) if isinstance(exc, ValueError) else "无法连接本机接收服务。"}
+
     def _lan_request(self, action: str, value: dict) -> dict:
+        return self._local_receiver_request("lan-" + action, value)
+
+    def _local_receiver_request(self, action: str, value: dict) -> dict:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         request = urllib.request.Request(
-            DASHBOARD_URL + "api/local/lan-" + action, data=json.dumps(value).encode("utf-8"),
-            headers={"Content-Type": "application/json", "X-MoryPaste-Lan-Control": self._client.lan_control_token},
+            DASHBOARD_URL + "api/local/" + action, data=json.dumps(value).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-MoryPaste-Lan-Control": self._client.outgoing_token if action == "outgoing" else self._client.lan_control_token,
+            },
         )
         try:
             with opener.open(request, timeout=30) as response:
@@ -739,11 +757,13 @@ class DesktopApi:
                 if not interface or not network.get("interfaceIndex"):
                     raise ValueError("找不到可用的局域网网卡，请检查电脑的网络连接。")
                 receiver_path = self._client.core.packaged_executable
-                status = firewall_access.get_status(receiver_path, interface)
-                if status.get("authorized") is not True:
-                    status = firewall_access.authorize(receiver_path, interface)
+                status = firewall_access.authorize(
+                    receiver_path, interface,
+                    on_progress=lambda phase: self._client._send_window_event("morypastePairProgress", phase),
+                )
                 if status.get("authorized") is not True:
                     raise ValueError("当前网络的防火墙授权尚未通过核验。")
+                self._client._send_window_event("morypastePairProgress", "start")
                 self._lan_request("start", network)
                 ready = self._client.core.service_ready()
                 return {**status, "serviceReady": ready,

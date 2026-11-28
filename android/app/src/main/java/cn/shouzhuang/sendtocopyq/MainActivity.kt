@@ -32,11 +32,16 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.card.MaterialCardView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -124,6 +129,12 @@ open class MainActivity : ComponentActivity() {
     private data class ReceptionRow(val card: View, val status: TextView, val receive: TextView)
     private val receptionRows = mutableMapOf<String, ReceptionRow>()
     private val discovery by lazy { LanDiscovery(this) }
+    private var incomingPanel: BottomSheetDialog? = null
+    private var incomingBusy = false
+    private var incomingInvite: BottomSheetDialog? = null
+    private var overlayPermissionPending = false
+    private var backgroundFilesRow: LinearLayout? = null
+    private val backgroundFilesSettings by lazy { getSharedPreferences("incoming-files", MODE_PRIVATE) }
     private val computerStatus = ConcurrentHashMap<String, String>()
     private val probingComputers = ConcurrentHashMap.newKeySet<String>()
     private var scanGeneration = 0
@@ -150,11 +161,112 @@ open class MainActivity : ComponentActivity() {
                     ClipboardSyncService.receptionUi.collect { state -> renderReceptionStatus(state) }
                 }
             }
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.RESUMED) { watchIncomingFiles() }
+            }
         }
+    }
+
+    private suspend fun watchIncomingFiles() {
+        while (true) {
+            val network = discovery.activeWifiNetwork()
+            if (network != null && !shareMode && !incomingBusy &&
+                !IncomingFilesService.handlingOffer && incomingPanel == null) {
+                for (peer in PeerStore.list(this)) {
+                    val offer = try {
+                        withContext(Dispatchers.IO) { IncomingFiles.poll(peer, network) }
+                    } catch (canceled: CancellationException) {
+                        throw canceled
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (offer != null && !shareMode && !IncomingFilesService.handlingOffer &&
+                        PeerStore.list(this).any { it.computerId == peer.computerId }) {
+                        showIncomingOffer(offer)
+                        break
+                    }
+                }
+            }
+            delay(1800)
+        }
+    }
+
+    private fun incomingSheet(title: String): Pair<BottomSheetDialog, LinearLayout> {
+        val dialog = BottomSheetDialog(this)
+        val content = incomingFileSheet(this, title)
+        dialog.setContentView(content)
+        dialog.setOnDismissListener {
+            if (incomingPanel === dialog) incomingPanel = null
+            if (incomingInvite === dialog) incomingInvite = null
+        }
+        incomingPanel = dialog
+        return dialog to content
+    }
+
+    private fun showIncomingOffer(offer: IncomingFiles.Offer) {
+        val (dialog, content) = incomingSheet("接收电脑文件")
+        content.addView(receivedFileOffer(this, offer) { accept -> handleIncomingOffer(dialog, offer, accept) })
+        incomingInvite = dialog
+        dialog.setCancelable(false)
+        dialog.show()
+    }
+
+    private fun handleIncomingOffer(dialog: BottomSheetDialog, offer: IncomingFiles.Offer, accept: Boolean) {
+        incomingBusy = true
+        IncomingFilesService.homeHandlingOffer = true
+        dialog.dismiss()
+        val progress = if (accept) {
+            val (receiving, content) = incomingSheet("正在接收文件")
+            content.addView(receivingFilePlaceholder(this))
+            receiving.setCancelable(false)
+            receiving.show()
+            receiving
+        } else null
+        lifecycleScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) {
+                    if (accept) IncomingFiles.receive(applicationContext, offer)
+                    else {
+                        IncomingFiles.respond(offer, "reject")
+                        emptyList()
+                    }
+                }
+                progress?.dismiss()
+                if (accept) showIncomingResult(offer, saved)
+            } catch (canceled: CancellationException) {
+                throw canceled
+            } catch (error: Exception) {
+                progress?.dismiss()
+                val (failure, content) = incomingSheet(if (accept) "接收失败" else "无法拒绝")
+                content.addView(label(error.message?.takeIf { it.any { char -> char in '一'..'龥' } }
+                    ?: "请检查网络连接和手机存储空间，再从电脑重新发送。", 14f, false), verticalParams())
+                content.addView(primaryButton("完成") { failure.dismiss() }, verticalParams())
+                failure.show()
+            } finally {
+                incomingBusy = false
+                IncomingFilesService.homeHandlingOffer = false
+            }
+        }
+    }
+
+    private fun showIncomingResult(offer: IncomingFiles.Offer, saved: List<Uri>) {
+        val (dialog, content) = incomingSheet("文件已接收")
+        content.addView(receivedFileResult(this, offer.files.zip(saved), fromBackground = false) { dialog.dismiss() })
+        dialog.show()
     }
 
     override fun onResume() {
         super.onResume()
+        if (!shareWindow) {
+            IncomingFilesService.homeVisible.value = true
+            if (overlayPermissionPending) {
+                if (Settings.canDrawOverlays(this)) {
+                    backgroundFilesSettings.edit().putBoolean("enabled", true).apply()
+                }
+                overlayPermissionPending = false
+            }
+            updateBackgroundFiles()
+        }
         if (!shareMode) refreshDiscovery()
         else if (resumeTargetSearch) {
             resumeTargetSearch = false
@@ -163,10 +275,36 @@ open class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        if (!shareWindow) {
+            IncomingFilesService.homeVisible.value = false
+            incomingInvite?.dismiss()
+        }
         resumeTargetSearch = routeSearch != null
         cancelRouteSearch()
         stopDiscovery()
         super.onPause()
+    }
+
+    private fun updateBackgroundFiles() {
+        val enabled = backgroundFilesSettings.getBoolean("enabled", false) && Settings.canDrawOverlays(this)
+        val service = Intent(this, IncomingFilesService::class.java)
+        if (enabled) ContextCompat.startForegroundService(this, service) else stopService(service)
+        backgroundFilesRow?.let { row ->
+            (row.getChildAt(row.childCount - 1) as? TextView)?.text = if (enabled) "已开启" else "未开启"
+        }
+    }
+
+    private fun toggleBackgroundFiles() {
+        if (backgroundFilesSettings.getBoolean("enabled", false) && Settings.canDrawOverlays(this)) {
+            backgroundFilesSettings.edit().putBoolean("enabled", false).apply()
+            updateBackgroundFiles()
+        } else if (Settings.canDrawOverlays(this)) {
+            backgroundFilesSettings.edit().putBoolean("enabled", true).apply()
+            updateBackgroundFiles()
+        } else {
+            overlayPermissionPending = true
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -287,6 +425,10 @@ open class MainActivity : ComponentActivity() {
                 }
             })
         }
+        val backgroundEnabled = backgroundFilesSettings.getBoolean("enabled", false) && Settings.canDrawOverlays(this)
+        backgroundFilesRow = settingsRow("后台接收文件", if (backgroundEnabled) "已开启" else "未开启") {
+            toggleBackgroundFiles()
+        }.also(rootColumn::addView)
         rootColumn.addView(settingsRow("关于与版本", "${BuildConfig.VERSION_NAME}  ›") {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle(R.string.app_name)
@@ -906,6 +1048,31 @@ open class MainActivity : ComponentActivity() {
         return found.toList()
     }
 
+    private fun addTransferArt(column: LinearLayout) {
+        val phone = ImageView(this).apply {
+            setImageResource(R.drawable.ic_phone_route)
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(45))
+        }
+        val computer = ImageView(this).apply {
+            setImageResource(R.drawable.ic_computer_outline)
+            layoutParams = LinearLayout.LayoutParams(dp(57), dp(45))
+        }
+        val art = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            background = rounded(R.color.brand_blue_soft, 16)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            addView(phone)
+            addView(label("→", 23f, true, R.color.brand_blue).apply {
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(dp(36), -2))
+            addView(computer)
+        }
+        column.addView(art, LinearLayout.LayoutParams(dp(176), dp(68)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(14)
+        })
+    }
+
     private fun buildShareUi() {
         rootColumn.removeAllViews()
         activeTargetName = ""
@@ -926,24 +1093,7 @@ open class MainActivity : ComponentActivity() {
         if (pendingUris.isNotEmpty()) rootColumn.addView(label("将发送 ${pendingUris.size} $countLabel", 14f, false, R.color.secondary_text).apply {
             gravity = Gravity.CENTER
         })
-        val transferArt = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            background = rounded(R.color.brand_blue_soft, 16)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-            addView(ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_phone_route)
-            }, LinearLayout.LayoutParams(dp(36), dp(45)))
-            addView(label("→", 23f, true, R.color.brand_blue).apply {
-                gravity = Gravity.CENTER
-            }, LinearLayout.LayoutParams(dp(36), -2))
-            addView(ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_computer_outline)
-            }, LinearLayout.LayoutParams(dp(57), dp(45)))
-        }
-        rootColumn.addView(transferArt, LinearLayout.LayoutParams(dp(176), dp(68)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = dp(14)
-        })
+        addTransferArt(rootColumn)
         shareTarget = label("", 14f, true, R.color.brand_blue).apply {
             gravity = Gravity.CENTER
             visibility = View.GONE
@@ -1365,6 +1515,7 @@ open class MainActivity : ComponentActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
+        incomingPanel?.dismiss()
         cancelRouteSearch()
         stopDiscovery()
         routeProbes.shutdownNow()

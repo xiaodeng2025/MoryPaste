@@ -134,7 +134,8 @@ def read_helper_result(path: Path) -> dict[str, Any]:
     return value
 
 
-def authorize(receiver_path: Path, interface_alias: str, *, base_dir: Path | None = None) -> dict[str, Any]:
+def authorize(receiver_path: Path, interface_alias: str, *, base_dir: Path | None = None,
+              on_progress=None) -> dict[str, Any]:
     script = helper_path(base_dir)
     if not script.is_file():
         raise FirewallAuthorizationError(f"找不到防火墙授权组件：{script}")
@@ -151,6 +152,8 @@ def authorize(receiver_path: Path, interface_alias: str, *, base_dir: Path | Non
         with tempfile.TemporaryDirectory(prefix='stcq-firewall-') as temp:
             result_path = Path(temp) / 'result.json'
             args += ['-ResultPath', str(result_path)]
+            if on_progress:
+                on_progress("windows")
             code = _shell_execute_elevated(subprocess.list2cmdline(args))
             result = read_helper_result(result_path)
             if code != 0 or not result['success'] or not result['ruleVerified']:
@@ -162,6 +165,8 @@ def authorize(receiver_path: Path, interface_alias: str, *, base_dir: Path | Non
                         exc.status, code if code is not None else exc.exit_code,
                         type(exc).__name__, type(exc.__cause__).__name__ if exc.__cause__ else None)
     # A valid product rule is authoritative even if the helper result was lost.
+    if on_progress:
+        on_progress("verify")
     status = get_status(receiver_path, interface_alias, base_dir=base_dir)
     if status.get('authorized') is True:
         if failure:

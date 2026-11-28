@@ -21,7 +21,8 @@ class ManagementApiTests(unittest.TestCase):
         cls.old_state = getattr(receiver.DashboardHandler, "state", None)
         state = SimpleNamespace(lock=threading.RLock(), devices={}, last_pairing=None, bind_ip="192.168.3.53", interface="test", interface_index=1,
                                 copyq_version="not checked", fingerprint="test", computer_id="test", computer_name="test",
-                                discovery_status="registered", pair_codes={}, last_event={}, clipboard_stream=None)
+                                discovery_status="registered", pair_codes={}, last_event={}, clipboard_stream=None,
+                                outgoing={})
         state.issue_pair_code = lambda: receiver.State.issue_pair_code(state)
         receiver.DashboardHandler.state = state
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), receiver.DashboardHandler)

@@ -16,6 +16,12 @@ function setup(authorize, nativeState) {
     document: {querySelectorAll: () => [button]},
     pairingAuthorization: false,
     lanPairError: '',
+    pairDialogGeneration: 1,
+    preparePairDialog: message => {
+      actions.push(message);
+      return 1;
+    },
+    showPairRetry: message => actions.push(message),
     nativeState,
     receiverState: {},
     byId: () => ({open: false}),
@@ -38,10 +44,10 @@ test('first click waits for authorization, then opens the QR once', async () => 
   const pending = context.startPairing();
   assert.equal(button.disabled, true);
   await context.startPairing();
-  assert.deepEqual(actions, ['authorize_firewall']);
+  assert.deepEqual(actions, ['正在检查局域网和 Windows 授权…', 'authorize_firewall']);
   approve({serviceReady: true});
   await pending;
-  assert.deepEqual(actions, ['authorize_firewall', 'qr']);
+  assert.deepEqual(actions, ['正在检查局域网和 Windows 授权…', 'authorize_firewall', 'qr']);
   assert.equal(button.disabled, false);
 });
 
@@ -49,7 +55,7 @@ test('cancelling displays the reason and leaves the button available', async () 
   const {context, actions, button} = setup(() => ({serviceReady: false, message: '已取消 Windows 授权。'}),
     {running: false});
   await context.startPairing();
-  assert.deepEqual(actions, ['authorize_firewall']);
+  assert.deepEqual(actions, ['正在检查局域网和 Windows 授权…', 'authorize_firewall', '已取消 Windows 授权。']);
   assert.equal(context.lanPairError, '已取消 Windows 授权。');
   assert.equal(button.disabled, false);
 });

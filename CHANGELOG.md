@@ -2,6 +2,15 @@
 
 正式版的安装包、SHA-256 和更新说明见对应 Release。待办项的进度以对应 Issue 为准。
 
+## 0.6.13 · 2026-11-28
+
+- 支持从 Windows 向已配对的 Android 手机传送文件。手机接受后开始传输，Windows 显示确认倒计时、进度和结果。需要 Android 0.5.11 或更新版本。
+- 首页常驻已授权手机列表。首次配对分阶段提示 Windows 授权和二维码进度，设置中可查看并复制局域网 IP。
+- Android 可选后台接收文件。授权后，解锁状态下可直接在屏幕底部接受或拒绝。接收成功后可打开保存文件夹。
+
+[Windows 0.6.13](https://github.com/xiaodeng2025/MoryPaste/releases/tag/v0.6.13) · [Android 0.5.11](https://github.com/xiaodeng2025/MoryPaste/releases/tag/android-v0.5.11)
+
+
 ## 0.6.12
 
 - 新增电脑到手机的自动文字剪贴板同步，以及手机到电脑的一键发送。需搭配 Android 0.5.10 或更新版本。

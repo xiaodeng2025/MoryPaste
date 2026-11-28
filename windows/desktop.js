@@ -30,11 +30,22 @@ window.stcqEscape=()=>{const opened=[...document.querySelectorAll('dialog[open]'
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();window.stcqEscape();}},true);
 document.querySelectorAll('dialog').forEach(d=>d.addEventListener('cancel',e=>{e.preventDefault();closeDialog(d);}));
 document.querySelector('.close-dialog').onclick=()=>closeDialog(byId('pairDialog'));
+function explainDeviceAction(button, description) {
+  const wrapper = text('span', '', 'device-action-help');
+  wrapper.dataset.help = description;
+  button.setAttribute('aria-description', description);
+  wrapper.append(button);
+  return wrapper;
+}
+
 function renderDevices(devices) {
   const root = byId('deviceList');
   const signature = JSON.stringify(devices);
   if (root.dataset.signature === signature) return;
   root.dataset.signature = signature;
+  const focused = document.activeElement;
+  const focusedDevice = focused?.closest('.device-row')?.dataset.deviceId;
+  const focusedAction = focused?.dataset.action;
   root.replaceChildren();
   if (!devices.length) {
     root.append(text('div', '还没有授权手机', 'empty'));
@@ -42,21 +53,29 @@ function renderDevices(devices) {
   }
   for (const device of devices) {
     const row = text('div', '', 'device-row');
+    row.dataset.deviceId = device.id;
     const badge = text('div', '', 'device-icon');
     badge.append(icon('device'));
     const info = text('div', '', 'device-info');
-    info.append(text('strong', device.name), text('p', '配对时间：' + date(device.created)));
-    const revoke = text('button', '撤销授权', 'text-button');
+    const identity = text('div', '', 'device-identity');
+    const syncState = device.clipboardSync ? (device.clipboardConnected ? 'connected' : 'disconnected') : 'off';
+    const syncStatus = {connected: '同步已连接', disconnected: '同步待连接', off: '同步未开启'};
+    identity.append(text('strong', device.name), text('span', syncStatus[syncState], 'device-sync-state is-' + syncState));
+    info.append(identity, text('p', '配对时间：' + date(device.created)));
+    const revoke = text('button', '撤销授权', 'text-button device-revoke');
+    revoke.dataset.action = 'revoke';
     revoke.onclick = () => {
       pendingRevoke = device;
-      byId('confirmMessage').textContent = '撤销“' + device.name + '”后，这台手机将无法发送文件、图片或剪贴板文字，也无法接收电脑剪贴板。你可以重新配对。';
+      byId('confirmMessage').textContent = '撤销“' + device.name + '”后，这台手机将无法与电脑传送文件或同步剪贴板。你可以重新配对。';
       byId('confirmDialog').showModal();
     };
-    const syncStatus = device.clipboardSync
-      ? (device.clipboardConnected ? '电脑 → 手机 · 已连接，复制文字即可同步' : '电脑 → 手机 · 已授权，当前未连接')
-      : '电脑 → 手机 · 未开启';
-    info.append(text('p', syncStatus));
-    const sync = text('button', device.clipboardSync ? '关闭同步' : '开启同步', 'text-button');
+    const sync = text('button', '', 'copy-sync-switch');
+    sync.dataset.action = 'sync';
+    sync.setAttribute('role', 'switch');
+    sync.setAttribute('aria-checked', String(device.clipboardSync === true));
+    const track = text('span', '', 'copy-sync-track');
+    track.setAttribute('aria-hidden', 'true');
+    sync.append(text('span', '复制同步'), track);
     sync.onclick = async () => {
       sync.disabled = true;
       try {
@@ -68,29 +87,93 @@ function renderDevices(devices) {
         sync.disabled = false;
       }
     };
-    row.append(badge, info, sync, revoke);
+    const transfer = device.outgoing;
+    const remaining = transfer?.remainingMs == null ? '' : ' · 剩余 ' + formatTransferTime(transfer.remainingMs);
+    const progress = transfer?.total ? Math.min(99, Math.floor(100 * transfer.sent / transfer.total)) : 0;
+    const messages = {
+      waiting: '等待手机确认' + remaining + '，请在手机上打开 MoryPaste',
+      sending: transfer?.saving ? '手机正在保存' : '正在传送 · ' + progress + '%',
+      rejected: '手机已拒绝',
+      complete: '文件已送达',
+      timeout: '手机未确认，请打开 MoryPaste 后重试',
+      failed: '传送失败，请检查连接与文件后重试',
+    };
+    const sendError = outgoingErrors.get(device.id);
+    const dismissed = transfer?.id && dismissedTransfers.get(device.id) === transfer.id;
+    const message = sendError || (dismissed ? undefined : messages[transfer?.status]);
+    const send = text('button', '传送文件', 'primary device-send');
+    send.dataset.action = 'send';
+    send.disabled = filePickerOpen || ['waiting', 'sending'].includes(transfer?.status);
+    send.onclick = async () => {
+      if (filePickerOpen) return;
+      filePickerOpen = true;
+      outgoingErrors.delete(device.id);
+      send.disabled = true;
+      try {
+        const result = await bridge('send_files', device.id);
+        if (result.error) outgoingErrors.set(device.id, result.error);
+      } catch (error) {
+        outgoingErrors.set(device.id, error.message || '无法打开文件选择器');
+      } finally {
+        filePickerOpen = false;
+        send.disabled = false;
+        await queueRefresh('devices');
+      }
+    };
+    const actions = text('div', '', 'device-actions');
+    actions.append(
+      explainDeviceAction(send, '从电脑选文件，发送到这台手机。'),
+      explainDeviceAction(sync, '开启后，电脑复制的文字可在这台手机上粘贴。'),
+      revoke,
+    );
+    row.append(badge, info, actions);
+    if (message) {
+      const status = sendError ? 'failed' : transfer.status;
+      const notice = text('div', '', 'device-transfer-status is-' + status);
+      notice.append(text('span', message));
+      if (status === 'failed' || status === 'timeout') {
+        const dismiss = text('button', '×', 'device-transfer-dismiss');
+        dismiss.dataset.action = 'dismiss';
+        dismiss.setAttribute('aria-label', '关闭传送提示');
+        dismiss.onclick = () => {
+          outgoingErrors.delete(device.id);
+          if (transfer?.id && ['failed', 'timeout'].includes(transfer.status)) {
+            dismissedTransfers.set(device.id, transfer.id);
+          }
+          notice.remove();
+          send.focus();
+        };
+        notice.append(dismiss);
+      }
+      row.append(notice);
+    }
     root.append(row);
+    if (focusedAction && device.id === focusedDevice) {
+      row.querySelector(`button[data-action="${focusedAction}"]`)?.focus({preventScroll: true});
+    }
   }
 }
 
-function showHomeDevices(expanded) {
-  byId('homeDevices').setAttribute('aria-expanded',String(expanded));
-  byId('homeDevicePanel').hidden=!expanded;
+let filePickerOpen = false;
+const outgoingErrors = new Map();
+const dismissedTransfers = new Map();
+function formatTransferTime(milliseconds) {
+  const seconds = Math.ceil(milliseconds / 1000);
+  const pad = value => String(value).padStart(2, '0');
+  return pad(Math.floor(seconds / 60)) + ':' + pad(seconds % 60);
 }
-byId('homeDevices').onclick=()=>showHomeDevices(byId('homeDevicePanel').hidden);
+setInterval(() => {
+  if (desktopVisible && activePage === 'home'
+      && receiverState?.devices.some(device => ['waiting', 'sending', 'complete', 'rejected'].includes(device.outgoing?.status))) {
+    queueRefresh('devices');
+  }
+}, 1000);
 
 let pairingAuthorization = false, lanPairError = '';
-function renderHomeActions(deviceCount, running) {
+function renderHomeActions(running) {
   const firewall = nativeState?.firewall;
   const waiting = nativeState?.serviceState === 'WAITING';
   const needsAttention = running && firewall?.available !== false && firewall?.authorized !== true;
-  const deviceButton = byId('homeDevices');
-  deviceButton.hidden = deviceCount === 0;
-  if (deviceButton.hidden) showHomeDevices(false);
-  const canAdd = waiting || needsAttention || (running && deviceCount === 0);
-  byId('homePair').hidden = !canAdd;
-  byId('homeFirstSteps').hidden = !canAdd;
-  byId('homeGuide').hidden = !running || needsAttention || deviceCount === 0;
   const hint = byId('lanPairHint');
   hint.hidden = !lanPairError && !waiting && !needsAttention && !pairingAuthorization;
   hint.textContent = pairingAuthorization ? '正在准备局域网接收…' : lanPairError ||
@@ -244,6 +327,9 @@ function renderSettings(settings, state) {
 }
 
 function renderReceiverState(state) {
+  const ip = state?.ip || '';
+  byId('lanIpAddress').textContent = ip || '暂未获取';
+  byId('copyLanIp').disabled = !ip;
   const running=Boolean(state) && (!window.pywebview?.api || nativeState?.running === true);
   const waiting=nativeState?.serviceState==='WAITING';
   const stopped=['STOPPED','FAILED','STOPPING'].includes(nativeState?.serviceState);
@@ -252,15 +338,14 @@ function renderReceiverState(state) {
   byId('retryState').hidden=running||waiting;
   if (!state) {
     byId('networkSummary').textContent='接收端状态未确认';
-    renderHomeActions(0,false);
+    renderHomeActions(false);
     return;
   }
   byId('appVersion').textContent='版本 '+(nativeState?.version || state.appVersion);
   byId('computerName').textContent=state.computerName;
   byId('networkSummary').textContent='局域网：'+(state.interface||'网卡信息未取得');
-  byId('deviceTotal').textContent='已授权手机 · '+state.devices.length+' 台';
   renderDevices(state.devices);
-  renderHomeActions(state.devices.length,running);
+  renderHomeActions(running);
   if (byId('pairDialog').open && qrDeadline && !state.pairingActive && Number(state.lastPairing?.time)>pairStartedAt) {
     clearInterval(qrTimer);
     qrDeadline=0;
@@ -335,7 +420,7 @@ window.morypasteWindowVisible=visible=>{
 if (!window.chrome?.webview) {
   document.addEventListener('visibilitychange',()=>window.morypasteWindowVisible(!document.hidden));
   setInterval(()=>{
-    if (desktopVisible && activePage==='home' && !byId('homeDevicePanel').hidden
+    if (desktopVisible && activePage==='home'
         && receiverState?.devices.some(device=>device.clipboardSync)) {
       queueRefresh('devices');
     }
@@ -344,6 +429,16 @@ if (!window.chrome?.webview) {
   window.chrome.webview.addEventListener('message',({data})=>{
     if (data?.type==='morypasteWindowVisible') window.morypasteWindowVisible(data.value);
     if (data?.type==='morypasteReceiverChanged') window.morypasteReceiverChanged(data.value);
+    if (data?.type==='morypastePairProgress' && pairingAuthorization && byId('pairDialog').open) {
+      const message = {
+        windows: '请在 Windows 授权窗口中确认。若窗口未弹到前面，请查看任务栏。',
+        verify: '正在核验 Windows 局域网授权…',
+        start: '正在启动局域网接收服务…',
+      }[data.value];
+      if (message && byId('pairDialog').classList.contains('pair-authorizing')) {
+        byId('expiry').textContent = message;
+      }
+    }
     if (data?.type==='morypasteUpdateProgress') {
       byId('updateStatus').textContent=data.value===null?'正在下载安装包…':`正在下载安装包 · ${data.value}%`;
     }
@@ -367,22 +462,38 @@ function resetPairDialog() {
   return ++pairDialogGeneration;
 }
 
-async function pair() {
+function preparePairDialog(message, authorizing = false) {
   const dialog = byId('pairDialog');
   const generation = resetPairDialog();
   dialog.classList.remove('pair-complete', 'android-guide');
+  dialog.classList.add('pair-preparing');
+  dialog.classList.toggle('pair-authorizing', authorizing);
+  dialog.classList.remove('pair-error');
   dialog.setAttribute('aria-labelledby', 'pairTitle');
   byId('pairTitle').hidden = false;
   byId('androidGuide').hidden = true;
   byId('pairWaiting').hidden = false;
   byId('pairSuccess').hidden = true;
-  if (!dialog.open) dialog.showModal();
-  pairStartedAt = Date.now() / 1000;
   byId('qrimg').replaceChildren();
   byId('pairResult').textContent = '';
-  byId('expiry').textContent = '正在准备一次性二维码';
-  const regenerate = byId('regeneratePair');
-  regenerate.disabled = true;
+  byId('expiry').setAttribute('aria-live', 'polite');
+  byId('expiry').textContent = message;
+  byId('regeneratePair').disabled = true;
+  if (!dialog.open) dialog.showModal();
+  return generation;
+}
+
+function showPairRetry(message, buttonText) {
+  byId('expiry').textContent = message;
+  byId('pairDialog').classList.add('pair-error');
+  const button = byId('regeneratePair');
+  button.textContent = buttonText;
+  button.disabled = false;
+}
+
+async function pair() {
+  const generation = preparePairDialog('正在生成配对二维码…');
+  pairStartedAt = Date.now() / 1000;
 
   try {
     const r = await request('/api/pairing', {});
@@ -392,6 +503,9 @@ async function pair() {
       throw Error('二维码格式无效');
     }
     byId('qrimg').replaceChildren(document.importNode(svg, true));
+    byId('pairDialog').classList.remove('pair-preparing');
+    byId('expiry').setAttribute('aria-live', 'off');
+    byId('regeneratePair').textContent = '重新生成二维码';
     qrDeadline = Date.now() + r.expiresIn * 1000;
     const tick = () => {
       const left = Math.max(0, Math.ceil((qrDeadline - Date.now()) / 1000));
@@ -405,48 +519,50 @@ async function pair() {
     tick();
     queueRefresh('devices');
   } catch (error) {
-    if (generation === pairDialogGeneration) byId('expiry').textContent = '生成失败：' + error.message;
+    if (generation === pairDialogGeneration) showPairRetry('生成失败：' + error.message, '重新生成二维码');
   } finally {
-    if (generation === pairDialogGeneration) regenerate.disabled = false;
+    if (generation === pairDialogGeneration) byId('regeneratePair').disabled = false;
   }
 }
 
 async function startPairing() {
   if (pairingAuthorization) return;
   if (window.pywebview?.api && (!nativeState?.running || nativeState.firewall?.authorized === false)) {
-    const dialog = byId('pairDialog');
-    if (dialog.open) closeDialog(dialog);
     pairingAuthorization = true;
     lanPairError = '';
+    const generation = preparePairDialog('正在检查局域网和 Windows 授权…', true);
     const buttons = [...document.querySelectorAll('[data-add-device]')];
     buttons.forEach(button => button.disabled = true);
     renderReceiverState(receiverState);
     try {
       const result = await bridge('authorize_firewall');
       if (!result.serviceReady) {
-        lanPairError = result.message;
-        return;
+        lanPairError = result.message || '无法启用局域网接收，请重试。';
       }
     } catch {
       lanPairError = '无法启用局域网接收，请重试。';
-      return;
     } finally {
       pairingAuthorization = false;
       buttons.forEach(button => button.disabled = false);
       renderReceiverState(receiverState);
       queueRefresh('health');
     }
+    if (generation !== pairDialogGeneration) return;
+    if (lanPairError) {
+      showPairRetry(lanPairError, '重试授权');
+      return;
+    }
   }
   await pair();
 }
 
 document.querySelectorAll('[data-add-device]').forEach(button => button.onclick = startPairing);
-byId('regeneratePair').onclick = pair;
+byId('regeneratePair').onclick = () => byId('pairDialog').classList.contains('pair-authorizing') ? startPairing() : pair();
 
 async function showAndroidGuide() {
   const dialog = byId('pairDialog');
   const generation = resetPairDialog();
-  dialog.classList.remove('pair-complete');
+  dialog.classList.remove('pair-complete', 'pair-preparing', 'pair-authorizing', 'pair-error');
   dialog.classList.add('android-guide');
   dialog.setAttribute('aria-labelledby', 'androidGuideTitle');
   for (const id of ['pairTitle', 'pairWaiting', 'pairSuccess']) byId(id).hidden = true;
@@ -632,7 +748,7 @@ byId('openAndroidRelease').onclick = async () => {
 byId('openFeedback').onclick = () => bridge('open_feedback_page').catch(() => toast('暂时无法打开 GitHub 反馈页。', true));
 
 
-byId('completePair').onclick=()=>{closeDialog(byId('pairDialog'));if(!byId('homeDevices').hidden)byId('homeDevices').focus();};
+byId('completePair').onclick=()=>{closeDialog(byId('pairDialog'));byId('addHomeDevice').focus();};
 byId('cancelRevoke').onclick=()=>closeDialog(byId('confirmDialog'));byId('confirmRevoke').onclick=async()=>{const device=pendingRevoke;if(!device||byId('confirmRevoke').disabled)return;const button=byId('confirmRevoke');button.disabled=true;try{await revokeAndConfirm(device.id);closeDialog(byId('confirmDialog'));toast('已撤销这台手机的授权');await queueRefresh('devices');}catch(e){toast(e.message,true);}finally{button.disabled=false;}};
 byId('startupSwitch').onclick=async()=>{const button=byId('startupSwitch');button.disabled=true;try{if(settingsState.startup.state==='system_disabled'){await bridge('open_startup_settings');return;}await bridge('set_startup',!settingsState.startup.registered);await refresh();}catch(e){toast(e.message,true);}finally{button.disabled=false;}};
 byId('removeStartup').onclick=async()=>{try{await bridge('set_startup',false);await refresh();toast('已移除登录启动项');}catch(e){toast(e.message,true);}};byId('systemStartup').onclick=()=>bridge('open_startup_settings').catch(e=>toast(e.message,true));
@@ -641,6 +757,16 @@ let copyqPathDirty = false;
 byId('copyqPath').addEventListener('input', () => { copyqPathDirty = true; });
 byId('saveSettings').onclick=async()=>{const b=byId('saveSettings');b.disabled=true;b.textContent='检查中…';try{const field=byId('copyqPath');const submitted=field.value;const r=await request('/api/settings',{copyqPath:submitted});if(field.value===submitted){field.value=r.copyqPath;copyqPathDirty=false;}await refresh();toast('CopyQ 路径已检查并保存');}catch(e){toast('设置未保存：'+e.message,true);}finally{b.disabled=false;b.textContent='检查并保存';}};
 byId('authorizeFirewall').onclick=async()=>{const b=byId('authorizeFirewall');b.disabled=true;try{const result=await bridge('authorize_firewall');lanPairError='';await queueRefresh('health','settings');toast(result.message,!result.serviceReady);}catch{toast('无法启用局域网接收，请重试。',true);}finally{b.disabled=false;}};
+byId('copyLanIp').onclick = async () => {
+  const ip = receiverState?.ip;
+  if (!ip) return;
+  try {
+    await navigator.clipboard.writeText(ip);
+    toast('已复制局域网 IP');
+  } catch {
+    toast('复制失败，可选中地址手动复制。', true);
+  }
+};
 byId('exportLogs').onclick = async () => {
   const button = byId('exportLogs');
   button.disabled = true;

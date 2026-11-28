@@ -350,7 +350,7 @@ object SecureTransport {
 
     fun sendClipboardText(peer: PairedComputer, network: android.net.Network, bytes: ByteArray) {
         require(bytes.size in 1..MAX_CLIPBOARD_TEXT_BYTES)
-        val connection = openClipboardRequest(peer, network, "/clipboard/text",
+        val connection = openSignedRequest(peer, network, "/clipboard/text",
             "application/vnd.morypaste.clipboard-text", bytes)
         try {
             connection.outputStream.use { it.write(bytes) }
@@ -368,9 +368,22 @@ object SecureTransport {
     }
 
     fun openClipboardSubscription(peer: PairedComputer, network: android.net.Network): HttpsURLConnection =
-        openClipboardRequest(peer, network, "/clipboard/subscribe", "application/vnd.morypaste.clipboard-subscription", ByteArray(0))
+        openSignedRequest(peer, network, "/clipboard/subscribe", "application/vnd.morypaste.clipboard-subscription", ByteArray(0))
 
-    private fun openClipboardRequest(peer: PairedComputer, network: android.net.Network, path: String,
+    fun outgoingRequest(peer: PairedComputer, network: android.net.Network, request: JSONObject): HttpsURLConnection {
+        val body = request.toString().toByteArray(Charsets.UTF_8)
+        val connection = openSignedRequest(peer, network, "/outgoing", "application/vnd.morypaste.outgoing", body)
+        try {
+            connection.readTimeout = 20_000
+            connection.outputStream.use { it.write(body) }
+            return connection
+        } catch (error: Exception) {
+            connection.disconnect()
+            throw error
+        }
+    }
+
+    private fun openSignedRequest(peer: PairedComputer, network: android.net.Network, path: String,
                                      mime: String, body: ByteArray): HttpsURLConnection {
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
         val nonce = ByteArray(18).also { SecureRandom().nextBytes(it) }.toHex()

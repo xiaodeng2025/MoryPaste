@@ -9,7 +9,7 @@ import threading
 import winreg
 from pathlib import Path
 
-APP_VERSION = "0.6.12"
+APP_VERSION = "0.6.13"
 STARTUP_NAME = "SendToCopyQ.lnk"
 APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
 

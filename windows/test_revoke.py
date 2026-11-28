@@ -9,7 +9,7 @@ class RevokeTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/'paired-devices.json'
         self.a='a'*24;self.b='b'*24
-        self.state=SimpleNamespace(lock=threading.RLock(),devices={self.a:{'name':'same'},self.b:{'name':'same'}},devices_path=self.path)
+        self.state=SimpleNamespace(lock=threading.RLock(),devices={self.a:{'name':'same'},self.b:{'name':'same'}},devices_path=self.path,outgoing={})
         self.state.save_devices=MethodType(receiver.State.save_devices,self.state)
         self.state.revoke_device=MethodType(receiver.State.revoke_device,self.state)
         self.state.save_devices()

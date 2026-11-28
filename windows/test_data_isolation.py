@@ -6,6 +6,18 @@ from unittest.mock import patch
 from data_paths import resolve_data_dir, child_environment
 
 class DataIsolationTests(unittest.TestCase):
+    def test_fresh_pairing_profile_rejects_the_existing_test_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "test-data-profile.json"
+            target = root / "SendToCopyQ-PairingProgressTest"
+            marker.write_text(json.dumps({"directory": target.name}), encoding="utf-8")
+            env = {"LOCALAPPDATA": temp, "SENDTOCOPYQ_DATA_DIR": str(root / "SendToCopyQ-PairingTest")}
+            with self.assertRaises(RuntimeError):
+                resolve_data_dir(env, root)
+            env["SENDTOCOPYQ_DATA_DIR"] = str(target)
+            self.assertEqual(resolve_data_dir(env, root), target)
+
     def test_missing_and_main_directory_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); (root/'test-data-profile.json').write_text(json.dumps({'directory':'SendToCopyQ-PairingTest'}))

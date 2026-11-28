@@ -156,6 +156,9 @@ dialog h2 { font-size: 22px; }
 dialog .subtitle { font-size: 13px; }
 .dialog-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .dialog-icon { color: var(--blue); padding: 6px; display: flex; }
+#pairDialog.pair-preparing #pairWaiting > :not(#expiry):not(#regeneratePair) { display: none; }
+#pairDialog.pair-preparing:not(.pair-error) #regeneratePair { display: none; }
+#pairDialog.pair-preparing #expiry { margin-block: 16px; color: #30425e; }
 .qr-box { text-align: center; background: #fff; margin: 12px auto 8px; min-height: 160px; display: grid; place-items: center; }
 .qr-box svg { stroke: none; width: 225px; height: 225px; max-width: 100%; padding: 8px; background: white; stroke-width: 1; stroke-linecap: butt; stroke-linejoin: miter; shape-rendering: crispEdges; }
 .qr-box:empty:after { content: "正在生成配对二维码…"; color: var(--muted); font-size: 14px; }
@@ -220,17 +223,17 @@ dialog .subtitle { font-size: 13px; }
 .about-update-details:not(:has(p:not([hidden]),button:not([hidden]))){display:none}
 .about-update-details .hint{margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}
 #page-settings .setting-row,#page-clipboard .setting-row{padding:11px 0}
-.home-devices-trigger{flex:none}
-.devices-chevron{width:7px;height:7px;border-bottom:1.5px solid currentColor;border-right:1.5px solid currentColor;transform:rotate(45deg);margin:0 2px 3px 3px}
-.home-devices-trigger[aria-expanded=true] .devices-chevron{transform:rotate(225deg);margin-bottom:-3px}
-.home-device-panel{margin-top:10px;padding:0 16px}
-.home-device-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
-.home-device-head h3{font-size:14px;margin:0}
+#page-home .hero{padding-block:12px}
+#page-home .section-heading{margin-top:12px}
+.home-device-panel{margin-top:12px;padding:0 16px;container-type:inline-size}
+.home-device-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}
+.home-device-head h2{font-size:15px}
 .home-device-head .text-button{display:inline-flex;align-items:center;gap:4px;min-height:34px}
 .home-device-head svg{width:15px;height:15px}
 .home-device-panel .device-row{padding-inline:0}
-.first-steps{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:10px}
-.first-steps .text-button{min-height:36px}
+.home-device-body{display:flex;align-items:center;gap:12px}
+#deviceList{flex:1;min-width:0}
+.home-device-body:has(.device-row) #homeInstall{display:none}
 #pairDialog.android-guide .dialog-icon{visibility:hidden}
 .pair-install-link{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:5px;margin-top:10px;color:var(--muted);font-size:13px}
 #downloadAndroid{margin-top:0;min-height:32px}
@@ -248,9 +251,61 @@ dialog .subtitle { font-size: 13px; }
 
 /* Dashboard refinements */
 main { margin-right: 8px; padding-inline: clamp(16px, 3vw, 30px); scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-.home-device-panel .device-row { gap: 8px; padding-block: 8px; flex-wrap: wrap; }
-.home-device-panel .device-row > .text-button { padding-inline: 6px; }
-.device-info p { margin-top: 2px; }
+.home-device-panel .device-row { column-gap: 8px; row-gap: 5px; padding-block: 8px; flex-wrap: wrap; }
+.device-row .device-icon { width: 26px; }
+.device-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 7px; }
+.device-identity strong { font-size: 14px; font-weight: 600; }
+.device-sync-state { padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: #f0f2f5; color: #455366; }
+.device-sync-state.is-connected { background: #eaf7ee; color: #14613a; }
+.device-sync-state.is-disconnected { background: #eaf1ff; color: #204b91; }
+.device-actions { display: flex; align-items: center; flex: none; gap: 8px; }
+.device-actions .primary { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.device-revoke { color: #5e697b; font-size: 12px; min-height: 32px; margin-inline-start: 4px; border-inline-start: 1px solid var(--line); padding: 4px 0 4px 12px; }
+.device-revoke:hover { color: #9e2d23; }
+.device-action-help { position: relative; display: inline-flex; }
+.device-action-help::after {
+  display: none; content: attr(data-help); position: absolute; z-index: 2; inset-inline-end: 0; bottom: calc(100% + 5px);
+  width: max-content; max-width: 230px; border-radius: 5px; padding: 6px 9px;
+  color: #fff; background: #28384e; font-size: 12px; pointer-events: none;
+}
+.device-action-help:hover::after, .device-action-help:has(:focus-visible)::after { display: block; }
+.copy-sync-switch {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 3px 6px;
+  white-space: nowrap; color: #34445a; background: #fff; border: 1px solid #d3dbe7; border-radius: 5px; font-size: 13px;
+}
+.copy-sync-switch:hover { background: #f3f6fb; }
+.copy-sync-track {
+  display: inline-flex; align-items: center; width: 34px; height: 20px; padding: 2px; border-radius: 10px;
+  background: linear-gradient(180deg, #a5363c, #d05b5b);
+  box-shadow: inset 0 1px 3px #40131b66, inset 0 -1px 0 #ffffff38, 0 1px 0 #fff;
+}
+.copy-sync-track::after {
+  content: ''; width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(180deg, #fff, #e8edf3);
+  box-shadow: 0 1px 3px #16243b70, inset 0 0 0 1px #ffffffb3;
+}
+.copy-sync-switch[aria-checked="true"] .copy-sync-track { justify-content: flex-end; background: linear-gradient(180deg, #167441, #34a267); }
+.copy-sync-switch:active .copy-sync-track::after { transform: translateY(1px); }
+@container (max-width: 390px) {
+  .device-actions { flex-basis: calc(100% - 34px); margin-inline-start: 34px; flex-wrap: wrap; }
+  .device-action-help::after { inset-inline-start: 0; inset-inline-end: auto; max-width: 180px; }
+}
+.device-send:disabled { background: #e7efff; color: #315078; cursor: default; }
+.device-transfer-status {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex: 1 0 100%; min-width: 0; margin: 0; box-sizing: border-box;
+  padding: 6px 10px; border-radius: 5px; background: #eaf1ff;
+  color: #204b91; font-size: 13px; overflow-wrap: anywhere;
+}
+.device-transfer-status span { min-width: 0; }
+.device-transfer-dismiss {
+  flex: none; border: 0; background: none; color: inherit;
+  min-width: 28px; min-height: 26px; font-size: 18px; border-radius: 4px;
+}
+.device-transfer-dismiss:hover { background: #f6ddca; }
+.device-transfer-status.is-complete { background: #eaf7ee; color: #14613a; }
+.device-transfer-status.is-failed, .device-transfer-status.is-timeout,
+.device-transfer-status.is-rejected { background: #fff1e7; color: #8b3d15; }
+.device-info p { font-size: 12px; margin-top: 1px; }
 .receipt-info p { white-space: normal; overflow-wrap: anywhere; }
 .receipt-meta { flex-wrap: wrap; }
 .archive-shortcut { display: inline-flex; align-items: center; gap: 8px; }
